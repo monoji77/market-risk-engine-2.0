@@ -3,9 +3,14 @@
 # [1] IMPORT LIBRARY
 #
 ############################
-import pandas as pd
-from utils.utils import PARENT_DIR,  DATA_PATH, TICKERS
+
+import json
+
 import numpy as np
+import pandas as pd
+
+from utils.utils import PARENT_DIR, DATA_PATH, TICKERS
+
 
 ############################
 #
@@ -13,91 +18,129 @@ import numpy as np
 #
 ############################
 
-ARTIFACTS_PATH = PARENT_DIR / 'artifacts'
-MARKET_PATH = ARTIFACTS_PATH / 'market_visualizations.json'
+ARTIFACTS_PATH = PARENT_DIR / "artifacts"
+ARTIFACTS_PATH.mkdir(parents=True, exist_ok=True)
 
-CLOSE = 'Close'
-DATE = 'Date'
-TICKER = 'Ticker'
-METRIC = 'Metric'
-RETURNS = 'Returns'
-LOG_RETURNS = 'Log_Returns'
-METRICS = ['Close', 'Returns', 'Log_Returns']
+MARKET_PATH = ARTIFACTS_PATH / "market_visualizations.json"
+
+CLOSE = "Close"
+DATE = "Date"
+
+
 ############################
 #
-# [2] HELPER FUNCTIONs
+# [3] HELPER FUNCTIONS
 #
 ############################
 
-def get_all_close_prices() -> pd.DataFrame: 
+def get_all_close_prices() -> pd.DataFrame:
     """
-    Build market visualizations using the close prices of the specified tickers.
+    Load close prices for all tickers and return a wide DataFrame.
+
+    Output shape:
+    Date        AAPL     MSFT     GOOGL    AMZN     TSLA     SPY
+    2001-01-02  0.22     ...      ...      ...      ...      ...
     """
+
     def load_close_prices(ticker: str) -> pd.Series:
-        """
-        Load the close price for a given ticker from the corresponding CSV file.
-        """
-        ticker_data = pd.read_csv(f'{DATA_PATH}/{ticker}.csv', index_col=0, parse_dates=True)
-        close = ticker_data[CLOSE]
+        file_path = DATA_PATH / f"{ticker}.csv"
+
+        ticker_data = pd.read_csv(
+            file_path,
+            index_col=0,
+            parse_dates=True
+        )
+
+        close = ticker_data[CLOSE].copy()
         close.name = ticker
         close.index.name = DATE
+
         return close
-    # Load close prices for all tickers and concatenate them into a single DataFrame
+
     combined_data = [load_close_prices(ticker) for ticker in TICKERS]
+
     close_prices = (
         pd.concat(combined_data, axis=1)
-            .sort_index()
-            .reset_index()
-            .melt(id_vars=DATE, var_name=TICKER, value_name=CLOSE)
+        .sort_index()
     )
-    close_prices[DATE] = close_prices[DATE].dt.strftime("%Y-%m-%d")
-    return close_prices    
+
+    close_prices.index.name = DATE
+
+    return close_prices
+
+
+def convert_to_long_records(df: pd.DataFrame, metric: str) -> list[dict]:
+    """
+    Convert wide DataFrame into frontend-friendly long records.
+
+    Output record:
+    {
+        "date": "2001-01-02",
+        "ticker": "AAPL",
+        "metric": "close",
+        "value": 0.2226
+    }
+    """
+
+    long_df = (
+        df.reset_index()
+        .melt(
+            id_vars=DATE,
+            var_name="ticker",
+            value_name="value"
+        )
+        .dropna(subset=["value"])
+    )
+
+    long_df["date"] = long_df[DATE].dt.strftime("%Y-%m-%d")
+    long_df["metric"] = metric
+
+    return long_df[["date", "ticker", "metric", "value"]].to_dict(
+        orient="records"
+    )
+
 
 def convert_to_frontend_json(close_prices: pd.DataFrame) -> None:
-    pct_change = close_prices[CLOSE].pct_change()
-    close_returns = close_prices.copy()
-    close_returns[CLOSE] = pct_change
+    close_returns = close_prices.pct_change()
+    close_log_returns = np.log(close_prices / close_prices.shift(1))
 
-    log_returns = np.log(close_prices[CLOSE]/close_prices[CLOSE].shift(1))
-    close_log_returns = close_prices.copy()
-    close_log_returns[CLOSE] = log_returns
-    
-    close_prices[METRIC] = CLOSE
-    close_returns[METRIC] = RETURNS
-    close_log_returns[METRIC] = LOG_RETURNS
     output = {
         "tickers": TICKERS,
-        "metrics": METRICS,
-        "start_date": close_prices[DATE].min(),
-        "end_date": close_prices[DATE].max(),
+        "metrics": ["close", "returns", "log_returns"],
+        "start_date": close_prices.index.min().strftime("%Y-%m-%d"),
+        "end_date": close_prices.index.max().strftime("%Y-%m-%d"),
         "data": (
-            close_prices.to_dict(orient='records'),
-            close_returns.to_dict(orient='records'),
-            close_log_returns.to_dict(orient='records')
-        )
+            convert_to_long_records(close_prices, "close")
+            + convert_to_long_records(close_returns, "returns")
+            + convert_to_long_records(close_log_returns, "log_returns")
+        ),
     }
 
-    pd.Series([output]).to_json(
-        MARKET_PATH,
-        orient='records',
-        indent=2
-    )
+    with MARKET_PATH.open("w", encoding="utf-8") as file:
+        json.dump(output, file, indent=2)
+
+    print(f"Saved market visualizations to: {MARKET_PATH}")
+    print(f"Start date: {output['start_date']}")
+    print(f"End date: {output['end_date']}")
+    print(f"Number of records: {len(output['data'])}")
+
 
 ############################
 #
-# [3] MAIN FUNCTION
+# [4] MAIN FUNCTION
 #
 ############################
+
 def main() -> None:
-    """
-    Main function to download historical stock data for specified tickers and save them as CSV files.
-    """
     close_prices = get_all_close_prices()
     convert_to_frontend_json(close_prices)
+
+
 ############################
 #
-# [4] RUN MAIN FUNCTION
+# [5] RUN MAIN FUNCTION
 #
 ############################
+
 if __name__ == "__main__":
     main()

@@ -1,24 +1,77 @@
 # Market Risk Engine 2.0
 
-`market_risk_2.0` is being built as a stronger follow-on to [`Monoji77/market_risk_engine`](https://github.com/Monoji77/market_risk_engine). The main goal is to improve the project architecture so audience-facing visualizations render much faster than they did in the earlier Streamlit-based setup, where query and page rendering times were too slow for a smoother frontend experience.
+`market_risk_2.0` is a follow-on build from [`Monoji77/market_risk_engine`](https://github.com/Monoji77/market_risk_engine), with the architecture redesigned around a dedicated analytics backend and a faster audience-facing frontend.
 
-This version separates the data/visualization backend from the presentation layer. Instead of relying on Streamlit to handle both analytics and UI delivery, the backend prepares frontend-ready market visualization artifacts that can be consumed by a dedicated web client.
+The earlier Streamlit setup was useful for rapid prototyping, but it mixed analytics, page rendering, and interaction into one layer. This version separates those concerns:
 
-## Current Status
+- the backend prepares market and risk artifacts
+- the frontend consumes those artifacts through a React + TypeScript + Vite interface
+- the overall goal is faster rendering, cleaner iteration, and a better foundation for richer market risk tooling
 
-The backend for basic market visualizations is currently complete. It reads market data, transforms close prices into visualization-friendly formats, and exports JSON artifacts for frontend consumption.
+## What This Project Is For
 
-Frontend work is being prepared in parallel using React, TypeScript, and Vite. The intent is to use that stack to showcase the backend visualizations through a faster, more responsive interface than the previous architecture allowed.
+The intent is to build a market risk platform that can move from raw return visualizations into more serious portfolio and risk analytics, while still feeling responsive from a frontend user perspective.
+
+Current frontend work focuses on:
+
+- close price visualization
+- close returns visualization
+- close log-returns visualization
+- interactive exploration of visible price history, peaks, troughs, and year-to-date movement
+
+## Risk Analytics Direction
+
+This repository is being extended beyond market charts into a broader set of risk measures and performance diagnostics. Planned and in-progress measures include:
+
+- drawdown
+- maximum drawdown
+- historical VaR
+- historical expected shortfall (historical ES)
+- CAGR
+- realized return distributions
+- rolling volatility
+- downside risk measures
+- stress testing outputs
+- comparative portfolio risk diagnostics
+
+The broader objective is to turn the current visualization layer into a surface for inspecting both market behavior and portfolio risk characteristics.
+
+## Current Architecture
+
+### Backend
+
+The backend is responsible for:
+
+- reading and transforming market data
+- producing frontend-ready JSON artifacts
+- serving those artifacts to the frontend
+- acting as the analytics layer for upcoming risk measures
+
+### Frontend
+
+The frontend is responsible for:
+
+- rendering fast, interactive market visualizations
+- exposing clean controls for asset and series selection
+- supporting richer user interaction than the previous Streamlit UI allowed
+- providing a base for future risk dashboards
 
 ## Project Structure
 
-- `backend/`: market data processing and visualization artifact generation
-- `frontend/`: React + TypeScript + Vite application for audience-facing visualizations
+- `backend/`: analytics scripts, artifact generation, API layer, and risk computations
+- `backend/artifacts/`: generated market and risk payloads for frontend use
+- `frontend/`: React + TypeScript + Vite application
 
-## Direction
+## Near-Term Roadmap
 
-This project is focused on:
+Near-term work is centered on:
 
-- reducing rendering and query latency for frontend users
-- decoupling analytics generation from UI delivery
-- creating a cleaner path for scaling market risk dashboards and visualizations
+- expanding the visualization layer from prices into risk measures
+- integrating drawdown and tail-risk views
+- surfacing historical VaR and historical ES clearly in the frontend
+- adding CAGR and related performance diagnostics
+- building a cleaner pipeline from analytics generation to frontend rendering
+
+## Design Goal
+
+The core design goal is not just to calculate risk metrics, but to make them explorable. This project is being structured so that computational work lives in the backend and the frontend can stay focused on presentation, interaction, and speed.
