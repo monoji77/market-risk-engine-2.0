@@ -11,8 +11,15 @@ export interface MarketDataRow {
   value: number
 }
 
+export interface DrawdownDataRow {
+  date: string
+  ticker: string
+  value: number
+}
+
 export interface MarketVisualizationPayload {
   data: MarketDataRow[]
+  drawdown_data?: DrawdownDataRow[]
   end_date: string
   metrics: Metric[]
   start_date: string
@@ -23,6 +30,11 @@ export interface MarketSeriesPoint {
   date: string
   time: Time
   value: number
+}
+
+export interface ChartVisibleRange {
+  from: number
+  to: number
 }
 
 export interface MarketSeriesSummary {
@@ -42,6 +54,7 @@ export interface MarketSeries {
 }
 
 export interface MarketDataset {
+  drawdownSeries: Record<string, MarketSeries>
   endDate: string
   metrics: Metric[]
   rowCount: number

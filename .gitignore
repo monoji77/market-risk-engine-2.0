@@ -30,3 +30,7 @@ dist-ssr
 __pycache__/
 *.py[cod]
 *$py.class
+
+# http files
+http-preview.log 
+http-preview.err

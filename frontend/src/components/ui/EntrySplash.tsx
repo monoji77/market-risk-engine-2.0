@@ -4,6 +4,13 @@ interface EntrySplashProps {
   visible: boolean
 }
 
+const loaderLines = [
+  'entry-splash__line--top',
+  'entry-splash__line--right',
+  'entry-splash__line--bottom',
+  'entry-splash__line--left',
+]
+
 export function EntrySplash({ visible }: EntrySplashProps) {
   return (
     <AnimatePresence>
@@ -16,7 +23,7 @@ export function EntrySplash({ visible }: EntrySplashProps) {
         >
           <div className="entry-splash__veil" aria-hidden="true"></div>
           <motion.div
-            className="entry-splash__panel"
+            className="entry-splash__loader"
             initial={{ opacity: 0, scale: 0.96, y: 24 }}
             animate={{
               opacity: 1,
@@ -30,67 +37,30 @@ export function EntrySplash({ visible }: EntrySplashProps) {
             }}
             exit={{ opacity: 0, scale: 1.03, y: -18 }}
             role="status"
-            aria-live="polite"
+            aria-label="Loading market risk engine"
           >
-            <div className="entry-splash__stack" aria-hidden="true">
-              {Array.from({ length: 9 }, (_, index) => (
-                <motion.span
-                  key={index}
-                  className="entry-splash__bar"
-                  initial={{ opacity: 0.35, scaleY: 0.35 }}
-                  animate={{
-                    opacity: [0.35, 0.85, 0.35],
-                    scaleY: [0.35, 1, 0.45],
-                  }}
-                  transition={{
-                    delay: index * 0.08,
-                    duration: 1.35,
-                    ease: 'easeInOut',
-                    repeat: Number.POSITIVE_INFINITY,
-                    repeatType: 'mirror',
-                  }}
-                ></motion.span>
-              ))}
-            </div>
-
             <motion.div
-              className="entry-splash__trace"
-              initial={{ opacity: 0.35, scaleX: 0.2 }}
+              className="entry-splash__glow"
+              aria-hidden="true"
               animate={{
-                opacity: [0.35, 1, 0.68],
-                scaleX: [0.2, 1, 0.92],
+                opacity: [0.38, 0.72, 0.38],
+                scale: [0.86, 1.18, 0.86],
               }}
               transition={{
-                duration: 2.2,
+                duration: 3.2,
                 ease: 'easeInOut',
                 repeat: Number.POSITIVE_INFINITY,
-                repeatType: 'mirror',
               }}
             ></motion.div>
 
-            <motion.p
-              className="entry-splash__eyebrow"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2, duration: 0.5, ease: 'easeOut' }}
-            >
-              Engine buffer
-            </motion.p>
-            <motion.h1
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.32, duration: 0.55, ease: 'easeOut' }}
-            >
-              Market Risk Engine
-            </motion.h1>
-            <motion.p
-              className="entry-splash__caption"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.44, duration: 0.55, ease: 'easeOut' }}
-            >
-              Calibrating the visualization surface
-            </motion.p>
+            <div className="entry-splash__orbit" aria-hidden="true">
+              {loaderLines.map((className) => (
+                <span
+                  key={className}
+                  className={`entry-splash__line ${className}`}
+                ></span>
+              ))}
+            </div>
           </motion.div>
         </motion.div>
       ) : null}

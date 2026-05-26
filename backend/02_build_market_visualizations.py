@@ -9,7 +9,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from utils.utils import PARENT_DIR, DATA_PATH, TICKERS
+from utils.utils import ARTIFACTS_PATH, LOG_RETURNS, RETURNS, TICKERS, convert_to_long_records, get_all_close_prices
 
 
 ############################
@@ -18,13 +18,11 @@ from utils.utils import PARENT_DIR, DATA_PATH, TICKERS
 #
 ############################
 
-ARTIFACTS_PATH = PARENT_DIR / "artifacts"
-ARTIFACTS_PATH.mkdir(parents=True, exist_ok=True)
 
+RECORDS = "records"
 MARKET_PATH = ARTIFACTS_PATH / "market_visualizations.json"
-
-CLOSE = "Close"
-DATE = "Date"
+CLOSE = "close"
+DRAWDOWN = "drawdown"
 
 
 ############################
@@ -33,86 +31,30 @@ DATE = "Date"
 #
 ############################
 
-def get_all_close_prices() -> pd.DataFrame:
-    """
-    Load close prices for all tickers and return a wide DataFrame.
 
-    Output shape:
-    Date        AAPL     MSFT     GOOGL    AMZN     TSLA     SPY
-    2001-01-02  0.22     ...      ...      ...      ...      ...
-    """
-
-    def load_close_prices(ticker: str) -> pd.Series:
-        file_path = DATA_PATH / f"{ticker}.csv"
-
-        ticker_data = pd.read_csv(
-            file_path,
-            index_col=0,
-            parse_dates=True
-        )
-
-        close = ticker_data[CLOSE].copy()
-        close.name = ticker
-        close.index.name = DATE
-
-        return close
-
-    combined_data = [load_close_prices(ticker) for ticker in TICKERS]
-
-    close_prices = (
-        pd.concat(combined_data, axis=1)
-        .sort_index()
-    )
-
-    close_prices.index.name = DATE
-
-    return close_prices
-
-
-def convert_to_long_records(df: pd.DataFrame, metric: str) -> list[dict]:
-    """
-    Convert wide DataFrame into frontend-friendly long records.
-
-    Output record:
-    {
-        "date": "2001-01-02",
-        "ticker": "AAPL",
-        "metric": "close",
-        "value": 0.2226
-    }
-    """
-
-    long_df = (
-        df.reset_index()
-        .melt(
-            id_vars=DATE,
-            var_name="ticker",
-            value_name="value"
-        )
-        .dropna(subset=["value"])
-    )
-
-    long_df["date"] = long_df[DATE].dt.strftime("%Y-%m-%d")
-    long_df["metric"] = metric
-
-    return long_df[["date", "ticker", "metric", "value"]].to_dict(
-        orient="records"
-    )
+def build_frontend_records(df: pd.DataFrame, metric: str) -> pd.DataFrame:
+    return convert_to_long_records(df, metric).rename(columns={"Date": "date"})
 
 
 def convert_to_frontend_json(close_prices: pd.DataFrame) -> None:
     close_returns = close_prices.pct_change()
     close_log_returns = np.log(close_prices / close_prices.shift(1))
+    close_drawdowns = close_prices - close_prices.cummax()
 
     output = {
         "tickers": TICKERS,
-        "metrics": ["close", "returns", "log_returns"],
+        "metrics": [CLOSE, RETURNS, LOG_RETURNS],
         "start_date": close_prices.index.min().strftime("%Y-%m-%d"),
         "end_date": close_prices.index.max().strftime("%Y-%m-%d"),
         "data": (
-            convert_to_long_records(close_prices, "close")
-            + convert_to_long_records(close_returns, "returns")
-            + convert_to_long_records(close_log_returns, "log_returns")
+            build_frontend_records(close_prices, CLOSE).to_dict(orient=RECORDS)
+            + build_frontend_records(close_returns, RETURNS).to_dict(orient=RECORDS)
+            + build_frontend_records(close_log_returns, LOG_RETURNS).to_dict(orient=RECORDS)
+        ),
+        "drawdown_data": (
+            build_frontend_records(close_drawdowns, DRAWDOWN)
+            .drop(columns=["metric"])
+            .to_dict(orient=RECORDS)
         ),
     }
 

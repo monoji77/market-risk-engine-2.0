@@ -106,12 +106,17 @@ export function ShiftingTabs<T extends string>({
           aria-haspopup="listbox"
           whileHover={{ y: -1 }}
           whileTap={{ scale: 0.99 }}
-          onClick={() => setIsOpen((previous) => !previous)}
+          onClick={openDropdown}
         >
           <span className="shifting-tabs__trigger-copy">
             <span className="shifting-tabs__trigger-value">
               {selectedOption?.label ?? label}
             </span>
+            {selectedOption?.description ? (
+              <span className="shifting-tabs__trigger-description">
+                {selectedOption.description}
+              </span>
+            ) : null}
           </span>
           <motion.span
             className="shifting-tabs__chevron"

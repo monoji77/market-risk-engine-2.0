@@ -61,9 +61,17 @@ function normalizePayload(payload: MarketVisualizationPayload): MarketDataset {
   const tickers = payload.tickers
   const metrics = payload.metrics.filter(isMetric)
   const series: MarketDataset['series'] = {}
+  const drawdownSeries: MarketDataset['drawdownSeries'] = {}
+  const drawdownRows = Array.isArray(payload.drawdown_data)
+    ? payload.drawdown_data
+    : []
 
   for (const ticker of tickers) {
     series[ticker] = {}
+    drawdownSeries[ticker] = {
+      points: [],
+      summary: emptySummary(),
+    }
   }
 
   for (const row of payload.data) {
@@ -95,6 +103,21 @@ function normalizePayload(payload: MarketVisualizationPayload): MarketDataset {
     })
   }
 
+  for (const row of drawdownRows) {
+    if (!drawdownSeries[row.ticker]) {
+      drawdownSeries[row.ticker] = {
+        points: [],
+        summary: emptySummary(),
+      }
+    }
+
+    drawdownSeries[row.ticker].points.push({
+      date: row.date,
+      time: row.date,
+      value: row.value,
+    })
+  }
+
   for (const ticker of Object.keys(series)) {
     for (const metric of metrics) {
       const marketSeries = series[ticker][metric]
@@ -107,7 +130,20 @@ function normalizePayload(payload: MarketVisualizationPayload): MarketDataset {
     }
   }
 
+  for (const ticker of Object.keys(drawdownSeries)) {
+    const drawdownSeriesForTicker = drawdownSeries[ticker]
+
+    if (drawdownSeriesForTicker.points.length === 0) {
+      continue
+    }
+
+    drawdownSeriesForTicker.summary = summarizeSeries(
+      drawdownSeriesForTicker.points,
+    )
+  }
+
   return {
+    drawdownSeries,
     endDate: payload.end_date,
     metrics,
     rowCount: payload.data.length,

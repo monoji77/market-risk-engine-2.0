@@ -8,6 +8,7 @@ import {
 import { motion } from 'framer-motion'
 import {
   ColorType,
+  LineStyle,
   LineSeries,
   createChart,
   createSeriesMarkers,
@@ -18,7 +19,11 @@ import {
   type SeriesMarker,
   type Time,
 } from 'lightweight-charts'
-import type { MarketSeriesPoint, Metric } from '../../types/market'
+import type {
+  ChartVisibleRange,
+  MarketSeriesPoint,
+  Metric,
+} from '../../types/market'
 import './MarketLineChart.css'
 
 const compactCurrencyFormatter = new Intl.NumberFormat('en-US', {
@@ -43,11 +48,11 @@ const percentFormatter = new Intl.NumberFormat('en-US', {
 
 const metricVisuals = {
   close: {
-    accentLine: '#7a0c19',
-    accentSolid: '#7a0c19',
-    glow: 'rgba(122, 12, 25, 0.32)',
+    accentLine: 'rgba(184, 91, 111, 0.94)',
+    accentSolid: '#b85b6f',
+    glow: 'rgba(184, 91, 111, 0.08)',
     lineWidth: 3 as const,
-    marker: '#eaa7b3',
+    marker: '#f0c2cd',
   },
   returns: {
     accentLine: 'rgba(168, 85, 247, 0.6)',
@@ -76,7 +81,7 @@ const metricVisuals = {
 
 const timeScaleOptions = {
   barSpacing: 0.2,
-  borderColor: 'rgba(174, 182, 198, 0.16)',
+  borderColor: 'rgba(174, 182, 198, 0)',
   fixLeftEdge: false,
   fixRightEdge: false,
   lockVisibleTimeRangeOnResize: true,
@@ -88,32 +93,39 @@ const timeScaleOptions = {
 
 interface MarketLineChartProps {
   defaultVisibleFrom: string
-  ticker: string
-  metric: Metric
-  points: MarketSeriesPoint[]
   isRefreshing: boolean
+  metric: Metric
+  onVisibleRangeChange?: (range: ChartVisibleRange | null) => void
+  points: MarketSeriesPoint[]
   refreshLabel: string
   rangeResetKey: string
+  syncedVisibleRange: ChartVisibleRange | null
+  ticker: string
 }
 
 type MarkerKind = 'peak' | 'trough'
 
 export function MarketLineChart({
   defaultVisibleFrom,
-  ticker,
-  metric,
-  points,
   isRefreshing,
+  metric,
+  onVisibleRangeChange,
+  points,
   refreshLabel,
   rangeResetKey,
+  syncedVisibleRange,
+  ticker,
 }: MarketLineChartProps) {
   const seriesKey = buildSeriesKey(ticker, metric)
   const surfaceRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const referenceSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
   const visibleRangeKeyRef = useRef<string | null>(null)
   const crosshairSnapshotRef = useRef<HoverSnapshot | null>(null)
+  const hoveredMarkerIdRef = useRef<string | null>(null)
+  const pinnedMarkerIdRef = useRef<string | null>(null)
   const [hoverSnapshot, setHoverSnapshot] = useState<HoverSnapshot | null>(null)
   const [viewportExtrema, setViewportExtrema] = useState<ViewportExtrema>({
     peakDate: null,
@@ -135,9 +147,15 @@ export function MarketLineChart({
       width: surface.clientWidth,
       height: surface.clientHeight,
     })
+
+    syncViewportMarkers()
   })
 
   const syncHoverSnapshot = useEffectEvent((param: MouseEventParams<Time>) => {
+    if (hoveredMarkerIdRef.current || pinnedMarkerIdRef.current) {
+      return
+    }
+
     const hoveredPoint =
       param.point && param.time ? resolveHoveredPoint(param, points) : null
     const nextSnapshot = hoveredPoint
@@ -149,10 +167,6 @@ export function MarketLineChart({
       : null
 
     crosshairSnapshotRef.current = nextSnapshot
-
-    if (hoveredMarkerId || pinnedMarkerId) {
-      return
-    }
 
     if (!hoveredPoint) {
       setHoverSnapshot(null)
@@ -192,6 +206,20 @@ export function MarketLineChart({
     })
   })
 
+  const syncSharedVisibleRange = useEffectEvent(
+    (range: ChartVisibleRange | null) => {
+      if (!range || !onVisibleRangeChange) {
+        return
+      }
+
+      if (areVisibleRangesClose(range, syncedVisibleRange)) {
+        return
+      }
+
+      onVisibleRangeChange(range)
+    },
+  )
+
   useEffect(() => {
     const surface = surfaceRef.current
 
@@ -219,7 +247,7 @@ export function MarketLineChart({
         },
       },
       rightPriceScale: {
-        borderColor: 'rgba(174, 182, 198, 0.16)',
+        borderColor: 'rgba(174, 182, 198, 0)',
       },
       timeScale: timeScaleOptions,
       handleScale: {
@@ -252,12 +280,26 @@ export function MarketLineChart({
     })
 
     const lineSeries = chart.addSeries(LineSeries, buildSeriesOptions('close'))
+    const referenceSeries = chart.addSeries(
+      LineSeries,
+      buildReferenceSeriesOptions(),
+    )
     const markers = createSeriesMarkers(lineSeries, [])
+    const handleVisibleLogicalRangeChange = (
+      range: { from: number; to: number } | null,
+    ) => {
+      syncViewportMarkers()
+      syncSharedVisibleRange(normalizeVisibleRange(range))
+    }
+
     chart.subscribeCrosshairMove(syncHoverSnapshot)
-    chart.timeScale().subscribeVisibleLogicalRangeChange(syncViewportMarkers)
+    chart
+      .timeScale()
+      .subscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange)
 
     chartRef.current = chart
     seriesRef.current = lineSeries
+    referenceSeriesRef.current = referenceSeries
     markersRef.current = markers
     visibleRangeKeyRef.current = null
 
@@ -270,10 +312,15 @@ export function MarketLineChart({
     return () => {
       observer.disconnect()
       chart.unsubscribeCrosshairMove(syncHoverSnapshot)
-      chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncViewportMarkers)
+      chart
+        .timeScale()
+        .unsubscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange)
       markersRef.current = null
+      referenceSeriesRef.current = null
       seriesRef.current = null
       chartRef.current = null
+      hoveredMarkerIdRef.current = null
+      pinnedMarkerIdRef.current = null
       visibleRangeKeyRef.current = null
       chart.remove()
     }
@@ -282,9 +329,10 @@ export function MarketLineChart({
   useEffect(() => {
     const chart = chartRef.current
     const lineSeries = seriesRef.current
+    const referenceSeries = referenceSeriesRef.current
     const markers = markersRef.current
 
-    if (!chart || !lineSeries || !markers) {
+    if (!chart || !lineSeries || !referenceSeries || !markers) {
       return
     }
 
@@ -309,6 +357,8 @@ export function MarketLineChart({
 
     lineSeries.applyOptions(buildSeriesOptions(metric))
     lineSeries.setData(points)
+    referenceSeries.applyOptions(buildReferenceSeriesOptions())
+    referenceSeries.setData(buildReferenceSeriesData(points, metric))
 
     const nextVisibleRangeKey = buildVisibleRangeKey(
       rangeResetKey,
@@ -323,6 +373,24 @@ export function MarketLineChart({
 
     syncViewportMarkers()
   }, [defaultVisibleFrom, metric, points, rangeResetKey])
+
+  useEffect(() => {
+    const chart = chartRef.current
+
+    if (!chart || !syncedVisibleRange) {
+      return
+    }
+
+    const currentRange = normalizeVisibleRange(
+      chart.timeScale().getVisibleLogicalRange(),
+    )
+
+    if (areVisibleRangesClose(currentRange, syncedVisibleRange)) {
+      return
+    }
+
+    chart.timeScale().setVisibleLogicalRange(syncedVisibleRange)
+  }, [syncedVisibleRange])
 
   useEffect(() => {
     if (hoveredMarkerId || pinnedMarkerId) {
@@ -348,12 +416,6 @@ export function MarketLineChart({
       className="market-chart-frame"
       style={{ '--chart-glow': visuals.glow } as CSSProperties}
     >
-      <div className="market-chart-copy">
-        <div className="market-chart-meta">
-          <span>{points.length.toLocaleString('en-US')} plotted points</span>
-        </div>
-      </div>
-
       <div className="market-chart-surface">
         <div
           className={`market-chart-date-card market-chart-date-card--${hoverTone}`}
@@ -412,6 +474,7 @@ export function MarketLineChart({
                 type: 'spring',
               }}
               onMouseEnter={() => {
+                hoveredMarkerIdRef.current = hotspot.id
                 setHoveredMarkerId(hotspot.id)
                 setHoverSnapshot({
                   date: hotspot.date,
@@ -421,17 +484,23 @@ export function MarketLineChart({
                 })
               }}
               onMouseLeave={() => {
+                if (hoveredMarkerIdRef.current === hotspot.id) {
+                  hoveredMarkerIdRef.current = null
+                }
+
                 setHoveredMarkerId((current) =>
                   current === hotspot.id ? null : current,
                 )
 
-                if (pinnedMarkerId === hotspot.id) {
+                if (pinnedMarkerIdRef.current === hotspot.id) {
+                  pinnedMarkerIdRef.current = null
                   setPinnedMarkerId(null)
                 }
 
                 setHoverSnapshot(crosshairSnapshotRef.current)
               }}
               onClick={() => {
+                pinnedMarkerIdRef.current = hotspot.id
                 setPinnedMarkerId(hotspot.id)
                 setHoverSnapshot({
                   date: hotspot.date,
@@ -462,16 +531,17 @@ export function MarketLineChart({
 
 function buildSeriesOptions(metric: Metric) {
   const visuals = metricVisuals[metric]
+  const showsLatestReferenceLine = metric === 'close'
 
   return {
     color: visuals.accentLine,
     crosshairMarkerRadius: 5,
     crosshairMarkerBorderColor: visuals.marker,
     crosshairMarkerBackgroundColor: visuals.accentSolid,
-    lastValueVisible: true,
+    lastValueVisible: showsLatestReferenceLine,
     lineWidth: visuals.lineWidth,
     priceLineColor: visuals.accentSolid,
-    priceLineVisible: true,
+    priceLineVisible: showsLatestReferenceLine,
     priceFormat: {
       type: 'custom' as const,
       minMove: metric === 'close' ? 0.01 : 0.0001,
@@ -662,7 +732,7 @@ function buildViewportMarkers(
 
   if (peakPoint && troughPoint && peakPoint.time === troughPoint.time) {
     const combinedMarker: SeriesMarker<Time> = {
-      color: '#f59e0b',
+      color: '#34d399',
       position: 'aboveBar',
       shape: 'circle',
       text: 'Peak / Trough',
@@ -694,7 +764,7 @@ function buildViewportMarkers(
       value: peakPoint.value,
     })
     markers.push({
-      color: '#f59e0b',
+      color: '#34d399',
       position: 'aboveBar',
       shape: 'circle',
       text: 'Peak',
@@ -710,7 +780,7 @@ function buildViewportMarkers(
       value: troughPoint.value,
     })
     markers.push({
-      color: '#34d399',
+      color: '#f59e0b',
       position: 'belowBar',
       shape: 'circle',
       text: 'Trough',
@@ -852,8 +922,59 @@ function buildMarkerHotspots(
         kind: source.kind,
         value: source.value,
         x: Number(x),
-        y: Number(y),
+        y: Number(y) + resolveMarkerHotspotOffset(source.kind),
       }
     })
     .filter((source): source is MarkerHotspot => Boolean(source))
+}
+
+function normalizeVisibleRange(
+  range: { from: number; to: number } | null,
+): ChartVisibleRange | null {
+  if (!range) {
+    return null
+  }
+
+  return {
+    from: Number(range.from),
+    to: Number(range.to),
+  }
+}
+
+function buildReferenceSeriesOptions() {
+  return {
+    color: 'rgba(148, 163, 184, 0.58)',
+    crosshairMarkerVisible: false,
+    lastValueVisible: false,
+    lineStyle: LineStyle.Dashed,
+    lineWidth: 1 as const,
+    priceLineVisible: false,
+  }
+}
+
+function buildReferenceSeriesData(points: MarketSeriesPoint[], metric: Metric) {
+  if (metric === 'close') {
+    return []
+  }
+
+  return points.map((point) => ({
+    time: point.time,
+    value: 0,
+  }))
+}
+
+function areVisibleRangesClose(
+  left: ChartVisibleRange | null,
+  right: ChartVisibleRange | null,
+) {
+  if (!left || !right) {
+    return left === right
+  }
+
+  return Math.abs(left.from - right.from) < 0.05 &&
+    Math.abs(left.to - right.to) < 0.05
+}
+
+function resolveMarkerHotspotOffset(kind: MarkerKind) {
+  return kind === 'peak' ? -18 : 18
 }
