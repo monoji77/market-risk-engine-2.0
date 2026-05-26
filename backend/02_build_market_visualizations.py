@@ -9,7 +9,15 @@ import json
 import numpy as np
 import pandas as pd
 
-from utils.utils import ARTIFACTS_PATH, LOG_RETURNS, RETURNS, TICKERS, convert_to_long_records, get_all_close_prices
+from utils.utils import (
+    ARTIFACTS_PATH,
+    FRONTEND_PUBLIC_PATH,
+    LOG_RETURNS,
+    RETURNS,
+    TICKERS,
+    convert_to_long_records,
+    get_all_close_prices,
+)
 
 
 ############################
@@ -21,6 +29,7 @@ from utils.utils import ARTIFACTS_PATH, LOG_RETURNS, RETURNS, TICKERS, convert_t
 
 RECORDS = "records"
 MARKET_PATH = ARTIFACTS_PATH / "market_visualizations.json"
+FRONTEND_MARKET_PATH = FRONTEND_PUBLIC_PATH / "market_visualizations.json"
 CLOSE = "close"
 DRAWDOWN = "drawdown"
 
@@ -58,10 +67,15 @@ def convert_to_frontend_json(close_prices: pd.DataFrame) -> None:
         ),
     }
 
-    with MARKET_PATH.open("w", encoding="utf-8") as file:
-        json.dump(output, file, indent=2)
+    ARTIFACTS_PATH.mkdir(parents=True, exist_ok=True)
+    FRONTEND_PUBLIC_PATH.mkdir(parents=True, exist_ok=True)
+
+    for output_path in (MARKET_PATH, FRONTEND_MARKET_PATH):
+        with output_path.open("w", encoding="utf-8") as file:
+            json.dump(output, file, indent=2)
 
     print(f"Saved market visualizations to: {MARKET_PATH}")
+    print(f"Saved frontend market data to: {FRONTEND_MARKET_PATH}")
     print(f"Start date: {output['start_date']}")
     print(f"End date: {output['end_date']}")
     print(f"Number of records: {len(output['data'])}")

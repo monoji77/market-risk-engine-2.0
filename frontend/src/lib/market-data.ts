@@ -8,9 +8,10 @@ import {
 } from '../types/market'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '')
+const staticMarketVisualizationUrl = `${import.meta.env.BASE_URL}market_visualizations.json`
 const marketVisualizationUrl = apiBaseUrl
   ? `${apiBaseUrl}/api/market/visualizations`
-  : '/api/market/visualizations'
+  : staticMarketVisualizationUrl
 
 let datasetPromise: Promise<MarketDataset> | null = null
 
@@ -36,7 +37,7 @@ async function loadVisualizationPayload() {
 
   if (!response.ok) {
     throw new Error(
-      `Market visualization request failed with ${response.status}. Start the backend API or set VITE_API_BASE_URL.`,
+      `Market visualization request failed with ${response.status}. Generate frontend/public/market_visualizations.json or set VITE_API_BASE_URL.`,
     )
   }
 

@@ -12,8 +12,10 @@ from pathlib import Path
 #
 #####################
 PARENT_DIR = Path(__file__).parent.parent
+REPO_ROOT = PARENT_DIR.parent
 DATA_PATH = PARENT_DIR / 'data'
 ARTIFACTS_PATH = PARENT_DIR / "artifacts"
+FRONTEND_PUBLIC_PATH = REPO_ROOT / "frontend" / "public"
 TICKERS = [
     # Interested stocks
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 

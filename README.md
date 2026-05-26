@@ -62,6 +62,32 @@ The frontend is responsible for:
 - `backend/artifacts/`: generated market and risk payloads for frontend use
 - `frontend/`: React + TypeScript + Vite application
 
+## Public Deployment
+
+For an employer-facing public link, deploy the frontend as a static site and treat the generated market JSON as a build artifact that is checked into the repo.
+
+- `backend/02_build_market_visualizations.py` now writes to both `backend/artifacts/market_visualizations.json` and `frontend/public/market_visualizations.json`
+- the frontend reads `frontend/public/market_visualizations.json` by default
+- if you want to point the frontend at a live API instead, set `VITE_API_BASE_URL`
+
+### Recommended Setup: Vercel
+
+1. Push the repository to GitHub.
+2. In Vercel, import the repository.
+3. Set the project root directory to `frontend`.
+4. Keep the default Vite build settings:
+   - Build command: `npm run build`
+   - Output directory: `dist`
+5. Deploy and use the generated `*.vercel.app` URL on your resume, LinkedIn, or applications.
+6. Optional: attach a custom domain for a cleaner public link.
+
+Because the repo already includes a scheduled GitHub Action that refreshes market data, each data update can also update `frontend/public/market_visualizations.json`, which keeps the deployed frontend current without requiring a live backend service.
+
+### Local Development
+
+- frontend only: run the Vite app from `frontend/` and it will use the checked-in static JSON file
+- frontend + backend API: set `VITE_API_BASE_URL` and run the FastAPI app separately if you want to test the split architecture locally
+
 ## Near-Term Roadmap
 
 Near-term work is centered on:
