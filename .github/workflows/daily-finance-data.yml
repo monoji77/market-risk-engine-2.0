@@ -2,8 +2,8 @@ name: Daily Finance Data Refresh
 
 on:
   schedule:
-    # Runs every day at 3:10 AM Singapore time
-    - cron: "10 3 * * *"
+    # Runs every day at 3:13AM Singapore time
+    - cron: "13 3 * * *"
       timezone: "Asia/Singapore"
 
   # Allows you to manually run it from GitHub Actions tab
@@ -32,7 +32,9 @@ jobs:
 
       - name: Run finance data script
         run: |
-          python 01_read_data.py
+          python backend/scripts/01_read_data.py
+          python backend/scripts/02_build_market_visualizations.py
+
 
       - name: Commit and push updated data
         run: |
