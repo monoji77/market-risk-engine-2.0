@@ -1,103 +1,154 @@
 # Market Risk Engine 2.0
 
-`market_risk_2.0` is a follow-on build from [`Monoji77/market_risk_engine`](https://github.com/Monoji77/market_risk_engine), with the architecture redesigned around a dedicated analytics backend and a faster audience-facing frontend.
+![Market Risk Engine 2.0 thumbnail](assets/thumbnail.png)
 
-The earlier Streamlit setup was useful for rapid prototyping, but it mixed analytics, page rendering, and interaction into one layer. This version separates those concerns:
+![React](https://img.shields.io/badge/React-19-20232A?logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.136-009688?logo=fastapi&logoColor=white)
+![Pandas](https://img.shields.io/badge/Pandas-3.0-150458?logo=pandas&logoColor=white)
+![NumPy](https://img.shields.io/badge/NumPy-2.4-013243?logo=numpy&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-Scheduled-2088FF?logo=githubactions&logoColor=white)
+![Vercel](https://img.shields.io/badge/Vercel-Deployed-000000?logo=vercel&logoColor=white)
+![Live Site](https://img.shields.io/badge/Live-market--risk--engine--2--0.vercel.app-0A66C2?logo=googlechrome&logoColor=white)
 
-- the backend prepares market and risk artifacts
-- the frontend consumes those artifacts through a React + TypeScript + Vite interface
-- the overall goal is faster rendering, cleaner iteration, and a better foundation for richer market risk tooling
+## Overview
 
-## What This Project Is For
+This repository contains the source code for a market risk platform that combines a Python analytics backend with a React + TypeScript frontend for interactive market and risk visualization.
 
-The intent is to build a market risk platform that can move from raw return visualizations into more serious portfolio and risk analytics, while still feeling responsive from a frontend user perspective.
+`market_risk_2.0` is a follow-on build from [`Monoji77/market_risk_engine`](https://github.com/Monoji77/market_risk_engine), with the architecture redesigned around:
 
-Current frontend work focuses on:
+- a dedicated backend for data preparation and analytics
+- a faster frontend for interactive charting and exploration
+- a cleaner path toward broader portfolio and market risk tooling
 
-- close price visualization
-- close returns visualization
-- close log-returns visualization
-- interactive exploration of visible price history, peaks, troughs, and year-to-date movement
-
-## Risk Analytics Direction
-
-This repository is being extended beyond market charts into a broader set of risk measures and performance diagnostics. Planned and in-progress measures include:
-
-- drawdown
-- maximum drawdown
-- historical VaR
-- historical expected shortfall (historical ES)
-- CAGR
-- realized return distributions
-- rolling volatility
-- downside risk measures
-- stress testing outputs
-- comparative portfolio risk diagnostics
-
-The broader objective is to turn the current visualization layer into a surface for inspecting both market behavior and portfolio risk characteristics.
-
-## Current Architecture
-
-### Backend
-
-The backend is responsible for:
-
-- reading and transforming market data
-- producing frontend-ready JSON artifacts
-- serving those artifacts to the frontend
-- acting as the analytics layer for upcoming risk measures
-
-### Frontend
-
-The frontend is responsible for:
-
-- rendering fast, interactive market visualizations
-- exposing clean controls for asset and series selection
-- supporting richer user interaction than the previous Streamlit UI allowed
-- providing a base for future risk dashboards
+Live site: [market-risk-engine-2-0.vercel.app](https://market-risk-engine-2-0.vercel.app/)
 
 ## Project Structure
 
-- `backend/`: analytics scripts, artifact generation, API layer, and risk computations
-- `backend/artifacts/`: generated market and risk payloads for frontend use
-- `frontend/`: React + TypeScript + Vite application
+```text
+.
+├── .github/
+│   └── workflows/
+│       └── daily-finance-data.yml   # Scheduled market data refresh workflow
+├── assets/
+│   └── thumbnail.png                # Repository thumbnail
+├── backend/
+│   ├── api/                         # FastAPI application and routes
+│   ├── artifacts/                   # Generated frontend-ready JSON artifacts
+│   ├── data/                        # Downloaded per-ticker CSV data
+│   ├── utils/                       # Shared backend helpers
+│   ├── 01_read_data.py              # Yahoo Finance data download script
+│   └── 02_build_market_visualizations.py
+│                                     # Market + drawdown artifact builder
+├── frontend/
+│   ├── public/
+│   │   └── market_visualizations.json
+│   │                                 # Static artifact served by the frontend
+│   ├── src/
+│   │   ├── assets/                   # Frontend images
+│   │   ├── components/               # Charts and reusable UI
+│   │   ├── lib/                      # Data loading / transformation
+│   │   ├── types/                    # Shared frontend types
+│   │   ├── App.tsx                   # Main application shell
+│   │   └── main.tsx                  # Frontend entry point
+│   ├── package.json                  # Frontend scripts and dependencies
+│   └── vite.config.ts                # Vite configuration
+├── requirements.txt                  # Pinned Python dependencies
+└── README.md
+```
 
-## Public Deployment
+## Key Features
 
-For an employer-facing public link, deploy the frontend as a static site and treat the generated market JSON as a build artifact that is checked into the repo.
+- Interactive market visualizations for close price, close returns, and close log-returns
+- Drawdown chart linked to the same visible range as the main market chart
+- Peak, trough, and maximum drawdown markers with hoverable contextual detail
+- Asset and series switching with frontend-side buffering and transition effects
+- FastAPI backend for serving frontend-ready JSON payloads
+- Static artifact path through `frontend/public/market_visualizations.json` for lightweight deployment
+- Scheduled GitHub Actions workflow to refresh market data and commit updated artifacts
 
-- `backend/02_build_market_visualizations.py` now writes to both `backend/artifacts/market_visualizations.json` and `frontend/public/market_visualizations.json`
-- the frontend reads `frontend/public/market_visualizations.json` by default
-- if you want to point the frontend at a live API instead, set `VITE_API_BASE_URL`
+## Tech Stack
 
-### Recommended Setup: Vercel
+### Frontend
 
-1. Push the repository to GitHub.
-2. In Vercel, import the repository.
-3. Set the project root directory to `frontend`.
-4. Keep the default Vite build settings:
-   - Build command: `npm run build`
-   - Output directory: `dist`
-5. Deploy and use the generated `*.vercel.app` URL on your resume, LinkedIn, or applications.
-6. Optional: attach a custom domain for a cleaner public link.
+- React 19
+- TypeScript 6
+- Vite 8
+- Framer Motion
+- Lightweight Charts
+- Radix UI Tooltip
+- Custom CSS
 
-Because the repo already includes a scheduled GitHub Action that refreshes market data, each data update can also update `frontend/public/market_visualizations.json`, which keeps the deployed frontend current without requiring a live backend service.
+### Backend
 
-### Local Development
+- Python 3.12
+- FastAPI
+- Pandas
+- NumPy
+- yfinance
 
-- frontend only: run the Vite app from `frontend/` and it will use the checked-in static JSON file
-- frontend + backend API: set `VITE_API_BASE_URL` and run the FastAPI app separately if you want to test the split architecture locally
+### Tooling and Deployment
 
-## Near-Term Roadmap
+- ESLint
+- GitHub Actions
+- Vercel
 
-Near-term work is centered on:
+## Getting Started
 
-- expanding the visualization layer from prices into risk measures
-- integrating drawdown and tail-risk views
-- surfacing historical VaR and historical ES clearly in the frontend
-- adding CAGR and related performance diagnostics
-- building a cleaner pipeline from analytics generation to frontend rendering
+### Prerequisites
 
-## Design Goal
+- Node.js
+- npm
+- Python 3.12
 
-The core design goal is not just to calculate risk metrics, but to make them explorable. This project is being structured so that computational work lives in the backend and the frontend can stay focused on presentation, interaction, and speed.
+### Run Locally
+
+```bash
+python -m pip install -r requirements.txt
+
+python backend/01_read_data.py
+python backend/02_build_market_visualizations.py
+
+cd frontend
+npm install
+npm run dev
+```
+
+By default, the frontend reads the checked-in static artifact from `frontend/public/market_visualizations.json`.
+
+### Run With Backend API
+
+```bash
+uvicorn api.main:app --reload --app-dir backend
+```
+
+If you want the frontend to call the FastAPI backend directly, set `VITE_API_BASE_URL` before starting the frontend dev server.
+
+## Available Commands
+
+| Command | Description |
+| --- | --- |
+| `cd frontend && npm run dev` | Starts the Vite development server |
+| `cd frontend && npm run build` | Runs TypeScript build checks and creates the production build in `frontend/dist/` |
+| `cd frontend && npm run lint` | Runs ESLint across the frontend |
+| `cd frontend && npm run preview` | Serves the production frontend build locally |
+| `python backend/01_read_data.py` | Downloads and refreshes source market CSVs |
+| `python backend/02_build_market_visualizations.py` | Builds market and drawdown JSON artifacts |
+| `uvicorn api.main:app --reload --app-dir backend` | Runs the FastAPI backend locally |
+
+## Deployment
+
+Production frontend assets are generated with:
+
+```bash
+cd frontend
+npm run build
+```
+
+This repository currently supports:
+
+- Vercel for the live frontend deployment
+- GitHub Actions for scheduled market data refreshes
+
+The daily workflow in `.github/workflows/daily-finance-data.yml` refreshes source data, rebuilds artifacts, and commits updated `backend/data` and `backend/artifacts` outputs automatically.

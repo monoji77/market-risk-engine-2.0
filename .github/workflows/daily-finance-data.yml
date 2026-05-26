@@ -2,8 +2,8 @@ name: Daily Finance Data Refresh
 
 on:
   schedule:
-    # Runs every day at 3:36AM Singapore time (7:36PM UTC, previous day)
-    - cron: "36 19 * * *"
+    # Runs every day at 6:15AM Singapore time (10:15PM UTC, previous day)
+    - cron: "15 22 * * *"
 
   # Allows you to manually run it from GitHub Actions tab
   workflow_dispatch:

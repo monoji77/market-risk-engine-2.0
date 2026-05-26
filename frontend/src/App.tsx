@@ -593,6 +593,25 @@ function App() {
         )}
         </AnimatePresence>
       </main>
+
+      <footer className="app-footer">
+        <div className="app-footer__inner">
+          <span className="app-footer__credit">Built by Chris Yong</span>
+          <a
+            className="app-footer__repo"
+            href="https://github.com/Monoji77/market-risk-engine-2.0"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <span className="app-footer__repo-badge" aria-hidden="true">
+              GitHub
+            </span>
+            <span className="app-footer__repo-name">
+              Monoji77/market-risk-engine-2.0
+            </span>
+          </a>
+        </div>
+      </footer>
     </div>
   )
 }
