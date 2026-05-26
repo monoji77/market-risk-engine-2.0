@@ -2,7 +2,7 @@ name: Daily Finance Data Refresh
 
 on:
   schedule:
-    # Runs every day at 6:40 PM Singapore time
+    # Runs every day at 3:10 AM Singapore time
     - cron: "10 3 * * *"
       timezone: "Asia/Singapore"
 
