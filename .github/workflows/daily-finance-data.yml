@@ -2,9 +2,8 @@ name: Daily Finance Data Refresh
 
 on:
   schedule:
-    # Runs every day at 3:13AM Singapore time
-    - cron: "13 3 * * *"
-      timezone: "Asia/Singapore"
+    # Runs every day at 3:36AM Singapore time (7:36PM UTC, previous day)
+    - cron: "36 19 * * *"
 
   # Allows you to manually run it from GitHub Actions tab
   workflow_dispatch:
@@ -19,6 +18,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,8 +34,8 @@ jobs:
 
       - name: Run finance data script
         run: |
-          python backend/scripts/01_read_data.py
-          python backend/scripts/02_build_market_visualizations.py
+          python backend/01_read_data.py
+          python backend/02_build_market_visualizations.py
 
 
       - name: Commit and push updated data
@@ -41,11 +43,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add data/ artifacts/
+          git add backend/data backend/artifacts
 
           if git diff --cached --quiet; then
             echo "No data changes to commit."
           else
             git commit -m "Update daily finance data"
-            git push
+            git push origin HEAD:${{ github.ref_name }}
           fi
