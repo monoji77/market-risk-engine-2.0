@@ -4,7 +4,8 @@
 #
 ############################
 import yfinance as yf
-from utils.utils import DATA_PATH, TICKERS, TODAY
+from utils.utils import DATA_PATH, TICKERS
+import pandas as pd 
 
 ############################
 #
@@ -17,7 +18,8 @@ def main() -> None:
     Main function to download historical stock data for specified tickers and save them as CSV files.
     """
     # Download historical data for the specified tickers
-    rich_data = yf.download(TICKERS, start='2001-01-01', end=TODAY)
+    END_DATE = (pd.Timestamp.now(tz="Asia/Singapore") + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    rich_data = yf.download(TICKERS, start='2001-01-01', end=END_DATE)
 
     # Separate each ticker from MultiIndex columns into individual DataFrames and save as CSV files
     for ticker in TICKERS:

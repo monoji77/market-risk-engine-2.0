@@ -28,7 +28,6 @@ VALUE = "value"
 METRIC = "metric"
 RETURNS = "returns"
 LOG_RETURNS = "log_returns"
-TODAY = pd.Timestamp.today().strftime('%Y-%m-%d')
 DATE = "Date"
 CLOSE = "Close"
 #####################
