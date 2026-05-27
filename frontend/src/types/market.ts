@@ -17,11 +17,26 @@ export interface DrawdownDataRow {
   value: number
 }
 
+export interface AdvancedMetricDataRow {
+  date: string
+  metric: 'daily_short_term_volatility'
+  ticker: string
+  value: number
+}
+
 export interface MarketVisualizationPayload {
   data: MarketDataRow[]
   drawdown_data?: DrawdownDataRow[]
   end_date: string
   metrics: Metric[]
+  start_date: string
+  tickers: string[]
+}
+
+export interface AdvancedMetricsPayload {
+  data: AdvancedMetricDataRow[]
+  end_date: string
+  metrics: string[]
   start_date: string
   tickers: string[]
 }
@@ -33,8 +48,8 @@ export interface MarketSeriesPoint {
 }
 
 export interface ChartVisibleRange {
-  from: number
-  to: number
+  from: string
+  to: string
 }
 
 export interface MarketSeriesSummary {
@@ -59,6 +74,7 @@ export interface MarketDataset {
   metrics: Metric[]
   rowCount: number
   series: Record<string, Partial<Record<Metric, MarketSeries>>>
+  shortTermVolatilitySeries: Record<string, MarketSeries>
   startDate: string
   tickers: string[]
 }

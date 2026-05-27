@@ -1,0 +1,290 @@
+.volatility-chart-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.volatility-chart-copy {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.volatility-chart-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.32rem;
+}
+
+.volatility-chart-title {
+  color: #ffbf75;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-shadow: 0 0 16px rgba(245, 158, 11, 0.22);
+  text-transform: uppercase;
+}
+
+.volatility-chart-surface {
+  position: relative;
+  min-height: 460px;
+  overflow: hidden;
+  border-radius: 1.5rem;
+  background:
+    radial-gradient(circle at top, var(--chart-glow) 0%, transparent 42%),
+    linear-gradient(180deg, rgba(8, 18, 16, 0.94) 0%, rgba(7, 11, 12, 0.98) 100%);
+}
+
+.volatility-chart-surface::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-position: center;
+  background-size: 42px 42px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.65), transparent);
+  pointer-events: none;
+}
+
+.volatility-chart-date-card {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 7;
+  display: grid;
+  gap: 0.2rem;
+  min-width: 10.5rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 1rem;
+  background: rgba(8, 10, 14, 0.28);
+  backdrop-filter: blur(10px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 12px 28px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+}
+
+.volatility-chart-date-card__eyebrow {
+  color: #9cf0e2;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.volatility-chart-date-card__value {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  color: #f5f7fb;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1rem;
+}
+
+.volatility-chart-date-card__month {
+  font-weight: 500;
+}
+
+.volatility-chart-date-card__day {
+  font-style: italic;
+  font-weight: 500;
+}
+
+.volatility-chart-date-card__year {
+  font-weight: 700;
+}
+
+.volatility-chart-date-card__latest-tag {
+  color: #b7c2d6;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.volatility-chart-date-card__metric {
+  color: #b8fff3;
+  font-family: 'Sora', sans-serif;
+  font-size: 0.88rem;
+}
+
+.volatility-chart-date-card--peak .volatility-chart-date-card__eyebrow,
+.volatility-chart-date-card--peak .volatility-chart-date-card__value,
+.volatility-chart-date-card--peak .volatility-chart-date-card__metric {
+  color: #9cf0e2;
+}
+
+.volatility-chart-date-card--peak {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 12px 28px rgba(45, 212, 191, 0.14);
+}
+
+.volatility-chart-date-card--trough .volatility-chart-date-card__eyebrow,
+.volatility-chart-date-card--trough .volatility-chart-date-card__value,
+.volatility-chart-date-card--trough .volatility-chart-date-card__metric {
+  color: #ffd08a;
+}
+
+.volatility-chart-date-card--trough {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 12px 28px rgba(245, 158, 11, 0.14);
+}
+
+.volatility-chart-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.volatility-chart-sync-point {
+  position: absolute;
+  z-index: 4;
+  display: inline-grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.volatility-chart-sync-point__core {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(204, 251, 241, 0.24);
+  box-shadow:
+    inset 0 0 0 1px rgba(204, 251, 241, 0.94),
+    0 0 0 6px rgba(45, 212, 191, 0.14),
+    0 0 18px rgba(45, 212, 191, 0.18);
+}
+
+.volatility-chart-hotspot {
+  position: absolute;
+  z-index: 5;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  transform: translate(-50%, -50%);
+}
+
+.volatility-chart-hotspot__core {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  opacity: 0.94;
+  transition:
+    box-shadow 180ms ease,
+    opacity 180ms ease;
+}
+
+.volatility-chart-hotspot--peak .volatility-chart-hotspot__core {
+  background: rgba(45, 212, 191, 0.28);
+  box-shadow:
+    inset 0 0 0 1px rgba(45, 212, 191, 0.9),
+    0 0 0 6px rgba(45, 212, 191, 0.14);
+}
+
+.volatility-chart-hotspot--trough .volatility-chart-hotspot__core {
+  background: rgba(245, 158, 11, 0.3);
+  box-shadow:
+    inset 0 0 0 1px rgba(245, 158, 11, 0.9),
+    0 0 0 6px rgba(245, 158, 11, 0.14);
+}
+
+.volatility-chart-hotspot[data-active='true'] .volatility-chart-hotspot__core {
+  opacity: 1;
+}
+
+.volatility-chart-hotspot--peak[data-active='true'] .volatility-chart-hotspot__core {
+  box-shadow:
+    inset 0 0 0 1px rgba(45, 212, 191, 0.98),
+    0 0 0 10px rgba(45, 212, 191, 0.16),
+    0 0 22px rgba(45, 212, 191, 0.22);
+}
+
+.volatility-chart-hotspot--trough[data-active='true'] .volatility-chart-hotspot__core {
+  box-shadow:
+    inset 0 0 0 1px rgba(245, 158, 11, 0.98),
+    0 0 0 10px rgba(245, 158, 11, 0.16),
+    0 0 22px rgba(245, 158, 11, 0.22);
+}
+
+.volatility-chart-refresh {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(180deg, rgba(8, 10, 14, 0.24) 0%, rgba(8, 10, 14, 0.66) 100%);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+.volatility-chart-refresh__card {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(16, 19, 25, 0.96) 0%, rgba(8, 10, 14, 0.98) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 20px 36px rgba(0, 0, 0, 0.3);
+}
+
+.volatility-chart-refresh__pulse {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #72f2d9 0%, #2dd4bf 100%);
+  box-shadow: 0 0 0 rgba(45, 212, 191, 0.5);
+  animation: volatility-buffer-pulse 1.2s ease-out infinite;
+}
+
+.volatility-chart-refresh__label {
+  color: #f8fafc;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.74rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+@keyframes volatility-buffer-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.42);
+    opacity: 0.9;
+  }
+
+  70% {
+    box-shadow: 0 0 0 14px rgba(45, 212, 191, 0);
+    opacity: 1;
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(45, 212, 191, 0);
+    opacity: 0.82;
+  }
+}
+
+@media (max-width: 720px) {
+  .volatility-chart-copy {
+    align-items: flex-start;
+  }
+
+  .volatility-chart-title-row {
+    justify-content: flex-start;
+  }
+
+  .volatility-chart-surface {
+    min-height: 360px;
+  }
+}

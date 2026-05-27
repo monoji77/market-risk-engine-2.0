@@ -10,6 +10,7 @@ interface ShiftingTabOption<T extends string> {
 }
 
 interface ShiftingTabsProps<T extends string> {
+  className?: string
   label: string
   labelTooltip?: ReactNode
   onChange: (value: T) => void
@@ -19,6 +20,7 @@ interface ShiftingTabsProps<T extends string> {
 }
 
 export function ShiftingTabs<T extends string>({
+  className,
   label,
   labelTooltip,
   onChange,
@@ -85,7 +87,11 @@ export function ShiftingTabs<T extends string>({
   }
 
   return (
-    <div ref={rootRef} className="shifting-tabs" onBlurCapture={handleBlur}>
+    <div
+      ref={rootRef}
+      className={['shifting-tabs', className].filter(Boolean).join(' ')}
+      onBlurCapture={handleBlur}
+    >
       <div className="shifting-tabs__label-row">
         <span className="shifting-tabs__label">{label}</span>
         {labelTooltip ? (

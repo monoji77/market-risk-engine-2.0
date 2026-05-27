@@ -45,6 +45,11 @@ def build_frontend_records(df: pd.DataFrame, metric: str) -> pd.DataFrame:
     return convert_to_long_records(df, metric).rename(columns={"Date": "date"})
 
 
+def write_json_output(output: dict, output_path) -> None:
+    with output_path.open("w", encoding="utf-8") as file:
+        json.dump(output, file, indent=2)
+
+
 def convert_to_frontend_json(close_prices: pd.DataFrame) -> None:
     close_returns = close_prices.pct_change()
     close_log_returns = np.log(close_prices / close_prices.shift(1))
@@ -70,12 +75,19 @@ def convert_to_frontend_json(close_prices: pd.DataFrame) -> None:
     ARTIFACTS_PATH.mkdir(parents=True, exist_ok=True)
     FRONTEND_PUBLIC_PATH.mkdir(parents=True, exist_ok=True)
 
-    for output_path in (MARKET_PATH, FRONTEND_MARKET_PATH):
-        with output_path.open("w", encoding="utf-8") as file:
-            json.dump(output, file, indent=2)
+    write_json_output(output, MARKET_PATH)
 
     print(f"Saved market visualizations to: {MARKET_PATH}")
-    print(f"Saved frontend market data to: {FRONTEND_MARKET_PATH}")
+
+    try:
+        write_json_output(output, FRONTEND_MARKET_PATH)
+        print(f"Saved frontend market data to: {FRONTEND_MARKET_PATH}")
+    except PermissionError:
+        print(
+            "Warning: unable to write frontend market data to "
+            f"{FRONTEND_MARKET_PATH}. Copy {MARKET_PATH} manually if needed."
+        )
+
     print(f"Start date: {output['start_date']}")
     print(f"End date: {output['end_date']}")
     print(f"Number of records: {len(output['data'])}")

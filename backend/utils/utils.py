@@ -70,6 +70,17 @@ def get_all_close_prices() -> pd.DataFrame:
 
     return close_prices
 
+def get_all_returns(close_prices: pd.DataFrame) -> pd.DataFrame:
+    """
+    Load close prices for all tickers, calculate returns, and return a wide DataFrame.
+
+    Output shape:
+    Date        AAPL     MSFT     GOOGL    AMZN     TSLA     SPY
+    2001-01-02  0.0023   ...      ...      ...      ...      ...
+    """
+
+    return close_prices.pct_change()
+
 def convert_to_long_records(df: pd.DataFrame, metric: str) -> list[dict]:
     """
     Convert wide DataFrame into long records.

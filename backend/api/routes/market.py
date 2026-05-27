@@ -9,6 +9,7 @@ router = APIRouter(prefix="/api/market", tags=["Market"])
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 MARKET_VISUALIZATIONS_PATH = BACKEND_DIR / "artifacts" / "market_visualizations.json"
+OTHER_RISK_MEASURES_PATH = BACKEND_DIR / "artifacts" / "other_risk_measures.json"
 
 
 @router.get("/visualizations")
@@ -56,3 +57,15 @@ def get_market_series(
         "end_date": payload["end_date"],
         "data": filtered_data,
     }
+
+
+@router.get("/advanced-metrics")
+def get_advanced_market_metrics():
+    if not OTHER_RISK_MEASURES_PATH.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="other_risk_measures.json not found. Run the backend risk measures script first.",
+        )
+
+    with OTHER_RISK_MEASURES_PATH.open("r", encoding="utf-8") as file:
+        return json.load(file)

@@ -1,4 +1,5 @@
 import {
+  type AdvancedMetricsPayload,
   metricOrder,
   type MarketDataset,
   type MarketSeriesPoint,
@@ -9,9 +10,13 @@ import {
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '')
 const staticMarketVisualizationUrl = `${import.meta.env.BASE_URL}market_visualizations.json`
+const staticAdvancedMetricsUrl = `${import.meta.env.BASE_URL}other_risk_measures.json`
 const marketVisualizationUrl = apiBaseUrl
   ? `${apiBaseUrl}/api/market/visualizations`
   : staticMarketVisualizationUrl
+const advancedMetricsUrl = apiBaseUrl
+  ? `${apiBaseUrl}/api/market/advanced-metrics`
+  : staticAdvancedMetricsUrl
 
 let datasetPromise: Promise<MarketDataset> | null = null
 
@@ -24,8 +29,12 @@ export function loadMarketDataset() {
 }
 
 async function getMarketDataset() {
-  const payload = await loadVisualizationPayload()
-  return normalizePayload(payload)
+  const [payload, advancedMetricsPayload] = await Promise.all([
+    loadVisualizationPayload(),
+    loadAdvancedMetricsPayload(),
+  ])
+
+  return normalizePayload(payload, advancedMetricsPayload)
 }
 
 async function loadVisualizationPayload() {
@@ -58,18 +67,54 @@ function assertPayload(payload: MarketVisualizationPayload) {
   return payload
 }
 
-function normalizePayload(payload: MarketVisualizationPayload): MarketDataset {
+async function loadAdvancedMetricsPayload() {
+  const response = await fetch(advancedMetricsUrl, {
+    headers: {
+      Accept: 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    return null
+  }
+
+  const payload = (await response.json()) as AdvancedMetricsPayload
+  return assertAdvancedMetricsPayload(payload)
+}
+
+function assertAdvancedMetricsPayload(payload: AdvancedMetricsPayload | null) {
+  if (!payload) {
+    return null
+  }
+
+  if (!Array.isArray(payload.tickers) || !Array.isArray(payload.data)) {
+    throw new Error('Advanced market metrics payload is malformed.')
+  }
+
+  return payload
+}
+
+function normalizePayload(
+  payload: MarketVisualizationPayload,
+  advancedMetricsPayload: AdvancedMetricsPayload | null,
+): MarketDataset {
   const tickers = payload.tickers
   const metrics = payload.metrics.filter(isMetric)
   const series: MarketDataset['series'] = {}
   const drawdownSeries: MarketDataset['drawdownSeries'] = {}
+  const shortTermVolatilitySeries: MarketDataset['shortTermVolatilitySeries'] = {}
   const drawdownRows = Array.isArray(payload.drawdown_data)
     ? payload.drawdown_data
     : []
+  const advancedMetricRows = advancedMetricsPayload?.data ?? []
 
   for (const ticker of tickers) {
     series[ticker] = {}
     drawdownSeries[ticker] = {
+      points: [],
+      summary: emptySummary(),
+    }
+    shortTermVolatilitySeries[ticker] = {
       points: [],
       summary: emptySummary(),
     }
@@ -119,6 +164,25 @@ function normalizePayload(payload: MarketVisualizationPayload): MarketDataset {
     })
   }
 
+  for (const row of advancedMetricRows) {
+    if (row.metric !== 'daily_short_term_volatility') {
+      continue
+    }
+
+    if (!shortTermVolatilitySeries[row.ticker]) {
+      shortTermVolatilitySeries[row.ticker] = {
+        points: [],
+        summary: emptySummary(),
+      }
+    }
+
+    shortTermVolatilitySeries[row.ticker].points.push({
+      date: row.date,
+      time: row.date,
+      value: row.value,
+    })
+  }
+
   for (const ticker of Object.keys(series)) {
     for (const metric of metrics) {
       const marketSeries = series[ticker][metric]
@@ -143,12 +207,25 @@ function normalizePayload(payload: MarketVisualizationPayload): MarketDataset {
     )
   }
 
+  for (const ticker of Object.keys(shortTermVolatilitySeries)) {
+    const shortTermVolatilitySeriesForTicker = shortTermVolatilitySeries[ticker]
+
+    if (shortTermVolatilitySeriesForTicker.points.length === 0) {
+      continue
+    }
+
+    shortTermVolatilitySeriesForTicker.summary = summarizeSeries(
+      shortTermVolatilitySeriesForTicker.points,
+    )
+  }
+
   return {
     drawdownSeries,
     endDate: payload.end_date,
     metrics,
     rowCount: payload.data.length,
     series,
+    shortTermVolatilitySeries,
     startDate: payload.start_date,
     tickers,
   }

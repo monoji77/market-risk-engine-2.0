@@ -64,10 +64,12 @@ const drawdownVisuals = {
 interface DrawdownChartProps {
   defaultVisibleFrom: string
   isRefreshing: boolean
+  onHoverDateChange?: (date: string | null) => void
   onVisibleRangeChange?: (range: ChartVisibleRange | null) => void
   points: MarketSeriesPoint[]
   rangeResetKey: string
   refreshLabel: string
+  syncedHoverDate?: string | null
   syncedVisibleRange: ChartVisibleRange | null
   ticker: string
 }
@@ -96,10 +98,12 @@ interface VisibleDrawdownExtrema {
 export function DrawdownChart({
   defaultVisibleFrom,
   isRefreshing,
+  onHoverDateChange,
   onVisibleRangeChange,
   points,
   rangeResetKey,
   refreshLabel,
+  syncedHoverDate = null,
   syncedVisibleRange,
   ticker,
 }: DrawdownChartProps) {
@@ -122,6 +126,9 @@ export function DrawdownChart({
   const [markerHotspots, setMarkerHotspots] = useState<MarkerHotspot[]>([])
   const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null)
   const [pinnedMarkerId, setPinnedMarkerId] = useState<string | null>(null)
+  const [syncedHoverPoint, setSyncedHoverPoint] = useState<MarkerHotspot | null>(
+    null,
+  )
 
   const syncChartFrame = useEffectEvent(() => {
     const surface = surfaceRef.current
@@ -137,6 +144,7 @@ export function DrawdownChart({
     })
 
     syncViewportExtrema()
+    syncSyncedHoverPoint()
   })
 
   const syncHoverSnapshot = useEffectEvent((param: MouseEventParams<Time>) => {
@@ -157,6 +165,7 @@ export function DrawdownChart({
     crosshairSnapshotRef.current = nextSnapshot
 
     setHoverSnapshot(nextSnapshot)
+    onHoverDateChange?.(nextSnapshot?.date ?? null)
   })
 
   const syncViewportExtrema = useEffectEvent(() => {
@@ -187,6 +196,48 @@ export function DrawdownChart({
       }
 
       return viewportMarker.maximumDrawdown
+    })
+  })
+
+  const syncSyncedHoverPoint = useEffectEvent(() => {
+    const chart = chartRef.current
+    const baselineSeries = seriesRef.current
+
+    if (!chart || !baselineSeries) {
+      return
+    }
+
+    if (
+      !syncedHoverDate ||
+      crosshairSnapshotRef.current ||
+      hoveredMarkerIdRef.current ||
+      pinnedMarkerIdRef.current
+    ) {
+      setSyncedHoverPoint(null)
+      return
+    }
+
+    const matchingPoint = points.find((point) => point.date === syncedHoverDate)
+
+    if (!matchingPoint) {
+      setSyncedHoverPoint(null)
+      return
+    }
+
+    const x = chart.timeScale().timeToCoordinate(matchingPoint.time)
+    const y = baselineSeries.priceToCoordinate(matchingPoint.value)
+
+    if (x === null || y === null) {
+      setSyncedHoverPoint(null)
+      return
+    }
+
+    setSyncedHoverPoint({
+      date: matchingPoint.date,
+      id: `synced:${matchingPoint.date}`,
+      value: matchingPoint.value,
+      x: Number(x),
+      y: Number(y),
     })
   })
 
@@ -270,11 +321,12 @@ export function DrawdownChart({
     const baselineSeries = chart.addSeries(BaselineSeries, buildSeriesOptions(points))
     const zeroLineSeries = chart.addSeries(LineSeries, buildZeroLineSeriesOptions())
     const markers = createSeriesMarkers(baselineSeries, [])
-    const handleVisibleLogicalRangeChange = (
-      range: { from: number; to: number } | null,
-    ) => {
+    const handleVisibleLogicalRangeChange = () => {
       syncViewportExtrema()
-      syncSharedVisibleRange(normalizeVisibleRange(range))
+      syncSharedVisibleRange(
+        normalizeVisibleTimeRange(chart.timeScale().getVisibleRange()),
+      )
+      syncSyncedHoverPoint()
     }
 
     chart.subscribeCrosshairMove(syncHoverSnapshot)
@@ -307,6 +359,7 @@ export function DrawdownChart({
       hoveredMarkerIdRef.current = null
       pinnedMarkerIdRef.current = null
       visibleRangeKeyRef.current = null
+      setSyncedHoverPoint(null)
       chart.remove()
     }
   }, [])
@@ -363,6 +416,7 @@ export function DrawdownChart({
     }
 
     syncViewportExtrema()
+    syncSyncedHoverPoint()
   }, [defaultVisibleFrom, points, rangeResetKey])
 
   useEffect(() => {
@@ -372,16 +426,18 @@ export function DrawdownChart({
       return
     }
 
-    const currentRange = normalizeVisibleRange(
-      chart.timeScale().getVisibleLogicalRange(),
-    )
+    const currentRange = normalizeVisibleRange(chart.timeScale().getVisibleRange())
 
     if (areVisibleRangesClose(currentRange, syncedVisibleRange)) {
       return
     }
 
-    chart.timeScale().setVisibleLogicalRange(syncedVisibleRange)
+    chart.timeScale().setVisibleRange(syncedVisibleRange)
   }, [syncedVisibleRange])
+
+  useEffect(() => {
+    syncSyncedHoverPoint()
+  }, [points, syncedHoverDate, syncSyncedHoverPoint])
 
   useEffect(() => {
     if (hoveredMarkerId || pinnedMarkerId) {
@@ -392,10 +448,15 @@ export function DrawdownChart({
   }, [hoveredMarkerId, pinnedMarkerId])
 
   const latestPoint = points.at(-1)
+  const syncedSnapshot =
+    !crosshairSnapshotRef.current && !hoveredMarkerId && !pinnedMarkerId
+      ? buildSnapshotByDate(points, syncedHoverDate, seriesKey)
+      : null
   const activeSnapshot =
     hoverSnapshot?.seriesKey === seriesKey
       ? hoverSnapshot
-      : buildLatestSnapshot(points, seriesKey)
+      : syncedSnapshot ?? buildLatestSnapshot(points, seriesKey)
+  const isLatestSnapshot = activeSnapshot?.date === latestPoint?.date
   const hoverDateParts = activeSnapshot
     ? formatDateParts(activeSnapshot.date)
     : null
@@ -467,6 +528,11 @@ export function DrawdownChart({
               <span className="drawdown-chart-date-card__year">
                 {hoverDateParts.year}
               </span>
+              {isLatestSnapshot ? (
+                <span className="drawdown-chart-date-card__latest-tag">
+                  (latest)
+                </span>
+              ) : null}
             </strong>
           ) : null}
           <span className="drawdown-chart-date-card__metric">
@@ -476,6 +542,17 @@ export function DrawdownChart({
           </span>
         </div>
         <div ref={surfaceRef} className="drawdown-chart-canvas"></div>
+        {syncedHoverPoint ? (
+          <div
+            className="drawdown-chart-sync-point"
+            style={{
+              left: `${syncedHoverPoint.x}px`,
+              top: `${syncedHoverPoint.y}px`,
+            }}
+          >
+            <span className="drawdown-chart-sync-point__core"></span>
+          </div>
+        ) : null}
         {markerHotspots.map((hotspot) => {
           const isActive =
             hoveredMarkerId === hotspot.id || pinnedMarkerId === hotspot.id
@@ -509,6 +586,7 @@ export function DrawdownChart({
                   seriesKey,
                   value: hotspot.value,
                 })
+                onHoverDateChange?.(hotspot.date)
               }}
               onMouseLeave={() => {
                 if (hoveredMarkerIdRef.current === hotspot.id) {
@@ -525,6 +603,7 @@ export function DrawdownChart({
                 }
 
                 setHoverSnapshot(crosshairSnapshotRef.current)
+                onHoverDateChange?.(crosshairSnapshotRef.current?.date ?? null)
               }}
               onClick={() => {
                 pinnedMarkerIdRef.current = hotspot.id
@@ -535,6 +614,7 @@ export function DrawdownChart({
                   seriesKey,
                   value: hotspot.value,
                 })
+                onHoverDateChange?.(hotspot.date)
               }}
             >
               <span className="drawdown-chart-hotspot__core"></span>
@@ -742,6 +822,28 @@ function buildLatestSnapshot(
   }
 }
 
+function buildSnapshotByDate(
+  points: MarketSeriesPoint[],
+  date: string | null | undefined,
+  seriesKey: string,
+): HoverSnapshot | null {
+  if (!date) {
+    return null
+  }
+
+  const matchingPoint = points.find((point) => point.date === date)
+
+  if (!matchingPoint) {
+    return null
+  }
+
+  return {
+    date: matchingPoint.date,
+    seriesKey,
+    value: matchingPoint.value,
+  }
+}
+
 function buildVisibleRangeKey(
   rangeResetKey: string,
   defaultVisibleFrom: string,
@@ -922,15 +1024,22 @@ function buildMarkerHotspots(
 }
 
 function normalizeVisibleRange(
-  range: { from: number; to: number } | null,
+  range: { from: Time; to: Time } | null,
 ): ChartVisibleRange | null {
   if (!range) {
     return null
   }
 
+  const from = normalizeTimeToDate(range.from)
+  const to = normalizeTimeToDate(range.to)
+
+  if (!from || !to) {
+    return null
+  }
+
   return {
-    from: Number(range.from),
-    to: Number(range.to),
+    from,
+    to,
   }
 }
 
@@ -942,8 +1051,13 @@ function areVisibleRangesClose(
     return left === right
   }
 
-  return Math.abs(left.from - right.from) < 0.05 &&
-    Math.abs(left.to - right.to) < 0.05
+  return left.from === right.from && left.to === right.to
+}
+
+function normalizeVisibleTimeRange(
+  range: { from: Time; to: Time } | null,
+): ChartVisibleRange | null {
+  return normalizeVisibleRange(range)
 }
 
 function formatDrawdownRangeLabel(detail: VisibleDrawdownExtrema) {

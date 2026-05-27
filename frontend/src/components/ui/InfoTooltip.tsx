@@ -3,11 +3,20 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 interface InfoTooltipProps {
+  align?: 'center' | 'end' | 'start'
   content: ReactNode
   label: string
+  side?: 'bottom' | 'left' | 'right' | 'top'
+  sideOffset?: number
 }
 
-export function InfoTooltip({ content, label }: InfoTooltipProps) {
+export function InfoTooltip({
+  align = 'center',
+  content,
+  label,
+  side = 'top',
+  sideOffset = 6,
+}: InfoTooltipProps) {
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const contentRef = useRef<HTMLDivElement | null>(null)
   const closeTimerRef = useRef<number | null>(null)
@@ -77,9 +86,9 @@ export function InfoTooltip({ content, label }: InfoTooltipProps) {
           <Tooltip.Content
             ref={contentRef}
             className="info-tooltip__content"
-            side="top"
-            align="center"
-            sideOffset={6}
+            side={side}
+            align={align}
+            sideOffset={sideOffset}
             collisionPadding={16}
             onMouseEnter={() => {
               clearCloseTimer()
