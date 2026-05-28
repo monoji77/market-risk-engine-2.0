@@ -45,16 +45,28 @@ const timeScaleOptions = {
 } as const
 
 const volatilityVisuals = {
-  glow: 'rgba(34, 197, 94, 0.14)',
-  line: '#5eead4',
-  marker: '#ccfbf1',
-  priceLine: '#2dd4bf',
-}
+  volatility: {
+    glow: 'rgba(34, 197, 94, 0.14)',
+    line: '#5eead4',
+    marker: '#ccfbf1',
+    priceLine: '#2dd4bf',
+  },
+  price: {
+    glow: 'rgba(184, 91, 111, 0.08)',
+    line: 'rgba(184, 91, 111, 0.94)',
+    marker: '#f0c2cd',
+    priceLine: '#b85b6f',
+  },
+} as const
+
+type VisualTone = keyof typeof volatilityVisuals
 
 interface ShortTermVolatilityChartProps {
   defaultVisibleFrom: string
   isRefreshing: boolean
+  isHoverLocked?: boolean
   onHoverDateChange?: (date: string | null) => void
+  onHoverLockChange?: (date: string | null, locked: boolean) => void
   onVisibleRangeChange?: (range: ChartVisibleRange | null) => void
   points: MarketSeriesPoint[]
   rangeResetKey: string
@@ -62,7 +74,10 @@ interface ShortTermVolatilityChartProps {
   syncedHoverDate?: string | null
   syncedVisibleRange: ChartVisibleRange | null
   ticker: string
+  title?: string
+  tooltipLabel?: string
   tooltipContent: ReactNode
+  visualTone?: VisualTone
 }
 
 interface HoverSnapshot {
@@ -98,7 +113,9 @@ interface MarkerHotspot {
 export function ShortTermVolatilityChart({
   defaultVisibleFrom,
   isRefreshing,
+  isHoverLocked = false,
   onHoverDateChange,
+  onHoverLockChange,
   onVisibleRangeChange,
   points,
   rangeResetKey,
@@ -106,14 +123,20 @@ export function ShortTermVolatilityChart({
   syncedHoverDate = null,
   syncedVisibleRange,
   ticker,
+  title = 'Daily short term volatility',
+  tooltipLabel = 'Daily short term volatility details',
   tooltipContent,
+  visualTone = 'volatility',
 }: ShortTermVolatilityChartProps) {
   const seriesKey = `${ticker}:daily-short-term-volatility`
+  const visuals = volatilityVisuals[visualTone]
   const surfaceRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
   const visibleRangeKeyRef = useRef<string | null>(null)
+  const syncedRangeTimerRef = useRef<number | null>(null)
+  const isApplyingSyncedRangeRef = useRef(false)
   const crosshairSnapshotRef = useRef<HoverSnapshot | null>(null)
   const hoveredMarkerIdRef = useRef<string | null>(null)
   const pinnedMarkerIdRef = useRef<string | null>(null)
@@ -144,11 +167,19 @@ export function ShortTermVolatilityChart({
       width: surface.clientWidth,
     })
 
+    if (isHoverLocked) {
+      syncLockedCrosshairPosition()
+    }
+
     syncViewportMarkers()
     syncSyncedHoverPoint()
   })
 
   const syncHoverSnapshot = useEffectEvent((param: MouseEventParams<Time>) => {
+    if (isHoverLocked) {
+      return
+    }
+
     if (hoveredMarkerIdRef.current || pinnedMarkerIdRef.current) {
       return
     }
@@ -175,6 +206,77 @@ export function ShortTermVolatilityChart({
     onHoverDateChange?.(hoveredPoint.date)
   })
 
+  const lockHoveredDate = useEffectEvent((point: MarketSeriesPoint) => {
+    const chart = chartRef.current
+    const lineSeries = seriesRef.current
+
+    if (!chart || !lineSeries) {
+      return
+    }
+
+    const nextSnapshot = {
+      date: point.date,
+      seriesKey,
+      value: point.value,
+    }
+
+    hoveredMarkerIdRef.current = null
+    pinnedMarkerIdRef.current = null
+    setHoveredMarkerId(null)
+    setPinnedMarkerId(null)
+    crosshairSnapshotRef.current = nextSnapshot
+    setHoverSnapshot(nextSnapshot)
+    chart.setCrosshairPosition(point.value, point.time, lineSeries)
+    onHoverDateChange?.(point.date)
+    onHoverLockChange?.(point.date, true)
+  })
+
+  const unlockHoveredDate = useEffectEvent(() => {
+    const chart = chartRef.current
+
+    hoveredMarkerIdRef.current = null
+    pinnedMarkerIdRef.current = null
+    setHoveredMarkerId(null)
+    setPinnedMarkerId(null)
+    crosshairSnapshotRef.current = null
+    setHoverSnapshot(null)
+    chart?.clearCrosshairPosition()
+    onHoverDateChange?.(null)
+    onHoverLockChange?.(null, false)
+  })
+
+  const handleChartClick = useEffectEvent((param: MouseEventParams<Time>) => {
+    const clickedPoint =
+      param.point && param.time ? resolveHoveredPoint(param, points) : null
+
+    if (!clickedPoint) {
+      return
+    }
+
+    lockHoveredDate(clickedPoint)
+  })
+
+  const syncLockedCrosshairPosition = useEffectEvent(() => {
+    const chart = chartRef.current
+    const lineSeries = seriesRef.current
+
+    if (!chart || !lineSeries || !syncedHoverDate) {
+      return
+    }
+
+    const matchingPoint = points.find((point) => point.date === syncedHoverDate)
+
+    if (!matchingPoint) {
+      return
+    }
+
+    chart.setCrosshairPosition(
+      matchingPoint.value,
+      matchingPoint.time,
+      lineSeries,
+    )
+  })
+
   const syncSharedVisibleRange = useEffectEvent(
     (range: ChartVisibleRange | null) => {
       if (!range || !onVisibleRangeChange) {
@@ -189,6 +291,41 @@ export function ShortTermVolatilityChart({
     },
   )
 
+  const unlockIfLockedDateLeavesRange = useEffectEvent(
+    (range: ChartVisibleRange | null) => {
+      if (!isHoverLocked || !syncedHoverDate || !range) {
+        return
+      }
+
+      if (syncedHoverDate < range.from || syncedHoverDate > range.to) {
+        unlockHoveredDate()
+      }
+    },
+  )
+
+  const scheduleSyncedRangeGuardRelease = useEffectEvent(() => {
+    if (syncedRangeTimerRef.current) {
+      window.clearTimeout(syncedRangeTimerRef.current)
+    }
+
+    syncedRangeTimerRef.current = window.setTimeout(() => {
+      isApplyingSyncedRangeRef.current = false
+      syncedRangeTimerRef.current = null
+    }, 160)
+  })
+
+  const suppressPointerTracking = useEffectEvent((event: Event) => {
+    if (!isHoverLocked) {
+      return
+    }
+
+    if (event instanceof MouseEvent && event.buttons !== 0) {
+      return
+    }
+
+    event.stopPropagation()
+  })
+
   const syncViewportMarkers = useEffectEvent(() => {
     const chart = chartRef.current
     const lineSeries = seriesRef.current
@@ -200,8 +337,13 @@ export function ShortTermVolatilityChart({
 
     const markerPayload = buildViewportMarkers(
       points,
-      chart.timeScale().getVisibleLogicalRange(),
+      normalizeVisibleTimeRange(
+        chart.timeScale().getVisibleRange(),
+        chart.timeScale().getVisibleLogicalRange(),
+        points,
+      ),
       defaultVisibleFrom,
+      visuals,
     )
 
     markers.setMarkers(markerPayload.markers)
@@ -228,12 +370,13 @@ export function ShortTermVolatilityChart({
       return
     }
 
-    if (
-      !syncedHoverDate ||
-      crosshairSnapshotRef.current ||
-      hoveredMarkerIdRef.current ||
-      pinnedMarkerIdRef.current
-    ) {
+    const shouldSuppressSyncedPoint =
+      !isHoverLocked &&
+      (crosshairSnapshotRef.current ||
+        hoveredMarkerIdRef.current ||
+        pinnedMarkerIdRef.current)
+
+    if (!syncedHoverDate || shouldSuppressSyncedPoint) {
       setSyncedHoverPoint(null)
       return
     }
@@ -258,6 +401,15 @@ export function ShortTermVolatilityChart({
       x: Number(x),
       y: Number(y),
     })
+  })
+
+  const restoreLockedHoverVisuals = useEffectEvent(() => {
+    if (!isHoverLocked) {
+      return
+    }
+
+    syncLockedCrosshairPosition()
+    syncSyncedHoverPoint()
   })
 
   useEffect(() => {
@@ -311,11 +463,11 @@ export function ShortTermVolatilityChart({
       crosshair: {
         vertLine: {
           color: 'rgba(174, 182, 198, 0.22)',
-          labelBackgroundColor: volatilityVisuals.priceLine,
+          labelBackgroundColor: visuals.priceLine,
         },
         horzLine: {
           color: 'rgba(174, 182, 198, 0.22)',
-          labelBackgroundColor: volatilityVisuals.priceLine,
+          labelBackgroundColor: visuals.priceLine,
         },
       },
       localization: {
@@ -323,17 +475,28 @@ export function ShortTermVolatilityChart({
       },
     })
 
-    const lineSeries = chart.addSeries(LineSeries, buildSeriesOptions())
+    const lineSeries = chart.addSeries(LineSeries, buildSeriesOptions(visuals))
     const markers = createSeriesMarkers(lineSeries, [])
     const handleVisibleLogicalRangeChange = () => {
-      syncViewportMarkers()
-      syncSharedVisibleRange(
-        normalizeVisibleTimeRange(chart.timeScale().getVisibleRange()),
+      const visibleRange = normalizeVisibleTimeRange(
+        chart.timeScale().getVisibleRange(),
+        chart.timeScale().getVisibleLogicalRange(),
+        points,
       )
-      syncSyncedHoverPoint()
-    }
 
+      syncViewportMarkers()
+      syncSyncedHoverPoint()
+      unlockIfLockedDateLeavesRange(visibleRange)
+
+      if (isApplyingSyncedRangeRef.current) {
+        scheduleSyncedRangeGuardRelease()
+        return
+      }
+
+      syncSharedVisibleRange(visibleRange)
+    }
     chart.subscribeCrosshairMove(syncHoverSnapshot)
+    chart.subscribeClick(handleChartClick)
     chart
       .timeScale()
       .subscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange)
@@ -349,18 +512,38 @@ export function ShortTermVolatilityChart({
 
     observer.observe(surface)
 
+    const handleContextMenu = (event: MouseEvent) => {
+      event.preventDefault()
+      unlockHoveredDate()
+    }
+
+    surface.addEventListener('contextmenu', handleContextMenu)
+    surface.addEventListener('pointerenter', restoreLockedHoverVisuals)
+    surface.addEventListener('mousemove', suppressPointerTracking, true)
+    surface.addEventListener('pointermove', suppressPointerTracking, true)
+
     return () => {
       observer.disconnect()
       chart.unsubscribeCrosshairMove(syncHoverSnapshot)
+      chart.unsubscribeClick(handleChartClick)
       chart
         .timeScale()
         .unsubscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange)
+      surface.removeEventListener('contextmenu', handleContextMenu)
+      surface.removeEventListener('pointerenter', restoreLockedHoverVisuals)
+      surface.removeEventListener('mousemove', suppressPointerTracking, true)
+      surface.removeEventListener('pointermove', suppressPointerTracking, true)
       markersRef.current = null
       seriesRef.current = null
       chartRef.current = null
       hoveredMarkerIdRef.current = null
       pinnedMarkerIdRef.current = null
       visibleRangeKeyRef.current = null
+      isApplyingSyncedRangeRef.current = false
+      if (syncedRangeTimerRef.current) {
+        window.clearTimeout(syncedRangeTimerRef.current)
+      }
+      syncedRangeTimerRef.current = null
       setSyncedHoverPoint(null)
       chart.remove()
     }
@@ -379,11 +562,11 @@ export function ShortTermVolatilityChart({
       crosshair: {
         vertLine: {
           color: 'rgba(174, 182, 198, 0.22)',
-          labelBackgroundColor: volatilityVisuals.priceLine,
+          labelBackgroundColor: visuals.priceLine,
         },
         horzLine: {
           color: 'rgba(174, 182, 198, 0.22)',
-          labelBackgroundColor: volatilityVisuals.priceLine,
+          labelBackgroundColor: visuals.priceLine,
         },
       },
       localization: {
@@ -400,7 +583,7 @@ export function ShortTermVolatilityChart({
       timeScale: timeScaleOptions,
     })
 
-    lineSeries.applyOptions(buildSeriesOptions())
+    lineSeries.applyOptions(buildSeriesOptions(visuals))
     lineSeries.setData(points)
 
     const nextVisibleRangeKey = buildVisibleRangeKey(
@@ -415,7 +598,7 @@ export function ShortTermVolatilityChart({
     }
     syncViewportMarkers()
     syncSyncedHoverPoint()
-  }, [defaultVisibleFrom, points, rangeResetKey])
+  }, [defaultVisibleFrom, points, rangeResetKey, visuals])
 
   useEffect(() => {
     const chart = chartRef.current
@@ -424,18 +607,61 @@ export function ShortTermVolatilityChart({
       return
     }
 
-    const currentRange = normalizeVisibleRange(chart.timeScale().getVisibleRange())
+    const currentRange = normalizeVisibleRange(
+      chart.timeScale().getVisibleRange(),
+      chart.timeScale().getVisibleLogicalRange(),
+      points,
+    )
 
     if (areVisibleRangesClose(currentRange, syncedVisibleRange)) {
       return
     }
 
-    chart.timeScale().setVisibleRange(syncedVisibleRange)
+    isApplyingSyncedRangeRef.current = true
+    applySyncedVisibleRange(chart, points, syncedVisibleRange)
+    scheduleSyncedRangeGuardRelease()
   }, [syncedVisibleRange])
 
   useEffect(() => {
     syncSyncedHoverPoint()
   }, [points, syncedHoverDate, syncSyncedHoverPoint])
+
+  useEffect(() => {
+    if (isHoverLocked) {
+      return
+    }
+
+    chartRef.current?.clearCrosshairPosition()
+  }, [isHoverLocked])
+
+  useEffect(() => {
+    if (!isHoverLocked) {
+      return
+    }
+
+    syncLockedCrosshairPosition()
+  }, [isHoverLocked, points, syncedHoverDate])
+
+  useEffect(() => {
+    if (!isHoverLocked || !syncedHoverDate) {
+      return
+    }
+
+    const matchingPoint = points.find((point) => point.date === syncedHoverDate)
+
+    if (!matchingPoint) {
+      return
+    }
+
+    const nextSnapshot = {
+      date: matchingPoint.date,
+      seriesKey,
+      value: matchingPoint.value,
+    }
+
+    crosshairSnapshotRef.current = nextSnapshot
+    setHoverSnapshot(nextSnapshot)
+  }, [isHoverLocked, points, seriesKey, syncedHoverDate])
 
   useEffect(() => {
     if (hoveredMarkerId || pinnedMarkerId) {
@@ -462,15 +688,13 @@ export function ShortTermVolatilityChart({
   return (
     <div
       className="volatility-chart-frame"
-      style={{ '--chart-glow': volatilityVisuals.glow } as CSSProperties}
+      style={{ '--chart-glow': visuals.glow } as CSSProperties}
     >
       <div className="volatility-chart-copy">
         <div className="volatility-chart-title-row">
-          <span className="volatility-chart-title">
-            Daily short term volatility
-          </span>
+          <span className="volatility-chart-title">{title}</span>
           <InfoTooltip
-            label="Daily short term volatility details"
+            label={tooltipLabel}
             content={tooltipContent}
             align="start"
             side="right"
@@ -551,6 +775,10 @@ export function ShortTermVolatilityChart({
                 type: 'spring',
               }}
               onMouseEnter={() => {
+                if (isHoverLocked) {
+                  return
+                }
+
                 hoveredMarkerIdRef.current = hotspot.id
                 setHoveredMarkerId(hotspot.id)
                 setHoverSnapshot({
@@ -562,6 +790,10 @@ export function ShortTermVolatilityChart({
                 onHoverDateChange?.(hotspot.date)
               }}
               onMouseLeave={() => {
+                if (isHoverLocked) {
+                  return
+                }
+
                 if (hoveredMarkerIdRef.current === hotspot.id) {
                   hoveredMarkerIdRef.current = null
                 }
@@ -579,6 +811,10 @@ export function ShortTermVolatilityChart({
                 onHoverDateChange?.(crosshairSnapshotRef.current?.date ?? null)
               }}
               onClick={() => {
+                const matchingPoint = points.find(
+                  (point) => point.date === hotspot.date,
+                )
+
                 pinnedMarkerIdRef.current = hotspot.id
                 setPinnedMarkerId(hotspot.id)
                 setHoverSnapshot({
@@ -588,6 +824,10 @@ export function ShortTermVolatilityChart({
                   value: hotspot.value,
                 })
                 onHoverDateChange?.(hotspot.date)
+
+                if (matchingPoint) {
+                  lockHoveredDate(matchingPoint)
+                }
               }}
             >
               <span className="volatility-chart-hotspot__core"></span>
@@ -609,11 +849,13 @@ export function ShortTermVolatilityChart({
   )
 }
 
-function buildSeriesOptions() {
+function buildSeriesOptions(
+  visuals: (typeof volatilityVisuals)[VisualTone],
+) {
   return {
-    color: volatilityVisuals.line,
-    crosshairMarkerBackgroundColor: volatilityVisuals.priceLine,
-    crosshairMarkerBorderColor: volatilityVisuals.marker,
+    color: visuals.line,
+    crosshairMarkerBackgroundColor: visuals.priceLine,
+    crosshairMarkerBorderColor: visuals.marker,
     crosshairMarkerRadius: 5,
     lastValueVisible: true,
     lineWidth: 3 as const,
@@ -624,7 +866,7 @@ function buildSeriesOptions() {
         values.map((value) => formatPercentValue(value)),
       type: 'custom' as const,
     },
-    priceLineColor: volatilityVisuals.priceLine,
+    priceLineColor: visuals.priceLine,
     priceLineVisible: true,
   }
 }
@@ -769,7 +1011,11 @@ function buildVisibleRangeKey(
   return `${rangeResetKey}:${defaultVisibleFrom}:${points.length}:${latestDate}`
 }
 
-function normalizeVisibleRange(range: { from: Time; to: Time } | null) {
+function normalizeVisibleRange(
+  range: { from: Time; to: Time } | null,
+  logicalRange: { from: number; to: number } | null = null,
+  points: MarketSeriesPoint[] = [],
+) {
   if (!range) {
     return null
   }
@@ -781,10 +1027,32 @@ function normalizeVisibleRange(range: { from: Time; to: Time } | null) {
     return null
   }
 
-  return {
+  const visibleRange: ChartVisibleRange = {
     from,
     to,
   }
+
+  if (
+    logicalRange &&
+    Number.isFinite(logicalRange.from) &&
+    Number.isFinite(logicalRange.to)
+  ) {
+    visibleRange.logicalFrom = logicalRange.from
+    visibleRange.logicalTo = logicalRange.to
+
+    const fromIndex = findPointIndexByDate(points, from)
+    const toIndex = findPointIndexByDate(points, to)
+
+    if (fromIndex !== null) {
+      visibleRange.fromDateOffset = logicalRange.from - fromIndex
+    }
+
+    if (toIndex !== null) {
+      visibleRange.toDateOffset = logicalRange.to - toIndex
+    }
+  }
+
+  return visibleRange
 }
 
 function areVisibleRangesClose(
@@ -795,21 +1063,90 @@ function areVisibleRangesClose(
     return false
   }
 
-  return left.from === right.from && left.to === right.to
+  const datesMatch = left.from === right.from && left.to === right.to
+  const leftLogicalFrom = left.logicalFrom
+  const leftLogicalTo = left.logicalTo
+  const rightLogicalFrom = right.logicalFrom
+  const rightLogicalTo = right.logicalTo
+  const logicalsAvailable =
+    typeof leftLogicalFrom === 'number' &&
+    typeof leftLogicalTo === 'number' &&
+    typeof rightLogicalFrom === 'number' &&
+    typeof rightLogicalTo === 'number'
+
+  if (!datesMatch || !logicalsAvailable) {
+    return datesMatch
+  }
+
+  return (
+    Math.abs(leftLogicalFrom - rightLogicalFrom) < 0.02 &&
+    Math.abs(leftLogicalTo - rightLogicalTo) < 0.02
+  )
 }
 
 function normalizeVisibleTimeRange(
   range: { from: Time; to: Time } | null,
+  logicalRange: { from: number; to: number } | null = null,
+  points: MarketSeriesPoint[] = [],
 ) {
-  return normalizeVisibleRange(range)
+  return normalizeVisibleRange(range, logicalRange, points)
+}
+
+function applySyncedVisibleRange(
+  chart: IChartApi,
+  points: MarketSeriesPoint[],
+  range: ChartVisibleRange,
+) {
+  const logicalRange = buildSyncedLogicalRange(points, range)
+
+  if (logicalRange) {
+    chart.timeScale().setVisibleLogicalRange(logicalRange)
+    return
+  }
+
+  chart.timeScale().setVisibleRange(range)
+}
+
+function buildSyncedLogicalRange(
+  points: MarketSeriesPoint[],
+  range: ChartVisibleRange,
+) {
+  if (
+    typeof range.fromDateOffset !== 'number' ||
+    typeof range.toDateOffset !== 'number'
+  ) {
+    return null
+  }
+
+  const fromIndex = findPointIndexByDate(points, range.from)
+  const toIndex = findPointIndexByDate(points, range.to)
+
+  if (fromIndex === null || toIndex === null) {
+    return null
+  }
+
+  return {
+    from: fromIndex + range.fromDateOffset,
+    to: toIndex + range.toDateOffset,
+  }
+}
+
+function findPointIndexByDate(points: MarketSeriesPoint[], date: string) {
+  const index = points.findIndex((point) => point.date === date)
+  return index >= 0 ? index : null
 }
 
 function buildViewportMarkers(
   points: MarketSeriesPoint[],
-  visibleLogicalRange: { from: number; to: number } | null,
+  visibleRange: ChartVisibleRange | null,
   defaultVisibleFrom: string,
+  visuals: (typeof volatilityVisuals)[VisualTone],
 ) {
-  const visibleWindow = buildVisibleWindow(points, visibleLogicalRange)
+  const visibleWindow = buildVisibleWindow(
+    points,
+    visibleRange,
+    defaultVisibleFrom,
+  )
 
   if (!visibleWindow) {
     return {
@@ -822,30 +1159,23 @@ function buildViewportMarkers(
     }
   }
 
-  const visiblePoints = visibleWindow.points.filter(
-    (point) => point.date >= defaultVisibleFrom,
-  )
-
-  if (!visiblePoints.length) {
-    return {
-      hotspots: [] as MarkerSource[],
-      markers: [] as SeriesMarker<Time>[],
-      viewportExtrema: {
-        peakDate: null,
-        troughDate: null,
-      },
-    }
-  }
-
-  const peakPoint = visiblePoints.reduce((peak, point) => {
-    if (!peak || point.value > peak.value) {
+  const peakPoint = visibleWindow.points.reduce((peak, point) => {
+    if (
+      !peak ||
+      point.value > peak.value ||
+      (point.value === peak.value && point.date > peak.date)
+    ) {
       return point
     }
 
     return peak
   }, null as MarketSeriesPoint | null)
-  const troughPoint = visiblePoints.reduce((trough, point) => {
-    if (!trough || point.value < trough.value) {
+  const troughPoint = visibleWindow.points.reduce((trough, point) => {
+    if (
+      !trough ||
+      point.value < trough.value ||
+      (point.value === trough.value && point.date > trough.date)
+    ) {
       return point
     }
 
@@ -868,7 +1198,7 @@ function buildViewportMarkers(
     ]
     const combinedMarkers: SeriesMarker<Time>[] = [
       {
-        color: '#f59e0b',
+        color: visuals.priceLine,
         position: 'aboveBar',
         price: peakPoint.value,
         shape: 'circle',
@@ -895,7 +1225,7 @@ function buildViewportMarkers(
       value: peakPoint.value,
     })
     markers.push({
-      color: '#5eead4',
+      color: visuals.priceLine,
       position: 'aboveBar',
       price: peakPoint.value,
       shape: 'circle',
@@ -930,24 +1260,25 @@ function buildViewportMarkers(
 
 function buildVisibleWindow(
   points: MarketSeriesPoint[],
-  visibleLogicalRange: { from: number; to: number } | null,
+  visibleRange: ChartVisibleRange | null,
+  defaultVisibleFrom: string,
 ) {
   if (!points.length) {
     return null
   }
 
-  if (!visibleLogicalRange) {
-    return {
-      endIndex: points.length - 1,
-      points,
-      startIndex: 0,
-    }
+  const latestDate = points.at(-1)?.date
+
+  if (!latestDate) {
+    return null
   }
 
-  const startIndex = clampIndex(Math.floor(visibleLogicalRange.from), points.length)
-  const endIndex = clampIndex(Math.ceil(visibleLogicalRange.to), points.length)
+  const visibleFrom = visibleRange?.from ?? defaultVisibleFrom
+  const visibleTo = visibleRange?.to ?? latestDate
+  const startIndex = points.findIndex((point) => point.date >= visibleFrom)
+  const endIndex = findLastVisibleIndex(points, visibleTo)
 
-  if (endIndex < startIndex) {
+  if (startIndex < 0 || endIndex < startIndex) {
     return null
   }
 
@@ -958,9 +1289,16 @@ function buildVisibleWindow(
   }
 }
 
-function clampIndex(index: number, length: number) {
-  return Math.min(Math.max(index, 0), length - 1)
+function findLastVisibleIndex(points: MarketSeriesPoint[], visibleTo: string) {
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    if (points[index].date <= visibleTo) {
+      return index
+    }
+  }
+
+  return -1
 }
+
 
 function resolveHoverTone(
   activeSnapshot: HoverSnapshot | null,

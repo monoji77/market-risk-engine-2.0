@@ -7,6 +7,19 @@
   --page-max-width: 1480px;
 }
 
+.chart-expansion-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  padding: 0;
+  border: none;
+  background:
+    radial-gradient(circle at top, rgba(122, 12, 25, 0.16), transparent 28%),
+    linear-gradient(180deg, rgba(3, 5, 8, 0.52) 0%, rgba(3, 5, 8, 0.82) 100%);
+  backdrop-filter: blur(18px) saturate(72%);
+  cursor: zoom-out;
+}
+
 .entry-splash {
   position: fixed;
   inset: 0;
@@ -147,6 +160,11 @@
   mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.96), transparent 96%);
   pointer-events: none;
   animation: risk-grid-drift 20s ease-in-out infinite alternate;
+  transition: opacity 220ms ease;
+}
+
+.app-shell[data-chart-expanded='true'] .risk-grid {
+  opacity: 0.3;
 }
 
 .topbar {
@@ -164,6 +182,12 @@
   transition:
     opacity 240ms ease,
     transform 240ms ease;
+}
+
+.app-shell[data-chart-expanded='true'] .topbar {
+  opacity: 0.16;
+  transform: translateY(-0.4rem);
+  pointer-events: none;
 }
 
 .topbar-nav {
@@ -751,6 +775,14 @@
   font-size: 0.9rem;
 }
 
+.summary-stat .summary-stat__meta {
+  margin-top: 0.34rem;
+  color: #9ccfbe;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+}
+
 .summary-stat__heading {
   display: inline-flex;
   align-items: flex-start;
@@ -775,6 +807,11 @@
   text-shadow: 0 0 16px rgba(184, 91, 111, 0.18);
 }
 
+.summary-stat .summary-stat__title--drawdown {
+  color: #f0b6c4;
+  text-shadow: 0 0 16px rgba(184, 91, 111, 0.16);
+}
+
 .summary-stat .summary-stat__title--volatility {
   color: #ff9a58;
   text-shadow: 0 0 16px rgba(249, 115, 22, 0.26);
@@ -789,8 +826,16 @@
   border: 1px solid rgba(184, 91, 111, 0.12);
 }
 
+.summary-stat--drawdown {
+  border: 1px solid rgba(184, 91, 111, 0.14);
+}
+
 .summary-stat--volatility {
   border: 1px solid rgba(245, 158, 11, 0.14);
+}
+
+.summary-stat--ewma {
+  min-height: 12.4rem;
 }
 
 .summary-stat strong {
@@ -905,6 +950,104 @@
   scroll-margin-top: 8rem;
 }
 
+.chart-expandable-card {
+  position: relative;
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+  isolation: isolate;
+}
+
+.chart-expandable-card__toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.chart-expandable-card__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.9rem;
+  height: 2.9rem;
+  padding: 0;
+  border: 1px solid rgba(134, 146, 166, 0.18);
+  border-radius: 999px;
+  background: rgba(10, 14, 20, 0.52);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 14px 26px rgba(0, 0, 0, 0.18);
+  color: #cfd7e4;
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.74rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.chart-expandable-card__toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.chart-expandable-card__toggle:hover,
+.chart-expandable-card__toggle:focus-visible {
+  border-color: rgba(141, 214, 166, 0.34);
+  background: rgba(15, 20, 27, 0.86);
+  color: #f6fbff;
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.chart-expandable-card--expanded {
+  position: fixed;
+  top: clamp(0.9rem, 2vw, 1.75rem);
+  left: 50%;
+  z-index: 140;
+  width: min(1380px, calc(100vw - 2rem));
+  max-height: calc(100vh - 1.8rem);
+  padding: clamp(1rem, 1.8vw, 1.4rem);
+  overflow: auto;
+  border: 1px solid rgba(141, 214, 166, 0.14);
+  border-radius: 1.6rem;
+  background:
+    radial-gradient(circle at top right, rgba(141, 214, 166, 0.08), transparent 26%),
+    linear-gradient(180deg, rgba(12, 18, 24, 0.98) 0%, rgba(6, 8, 11, 0.99) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 38px 90px rgba(0, 0, 0, 0.48);
+  transform: translateX(-50%);
+}
+
+.chart-expandable-card--expanded .chart-expandable-card__toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  padding-bottom: 0.15rem;
+}
+
+.chart-expandable-card--expanded .chart-expandable-card__toggle {
+  background: rgba(12, 18, 24, 0.96);
+}
+
+.chart-expandable-card--expanded .market-chart-surface,
+.chart-expandable-card--expanded .volatility-chart-surface {
+  min-height: min(74vh, 920px);
+}
+
+.chart-expandable-card--expanded .drawdown-chart-surface {
+  min-height: min(68vh, 820px);
+}
+
 .advanced-chart-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -935,6 +1078,132 @@
   font-size: 0.82rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.advanced-ewma-shell {
+  display: grid;
+  gap: 1rem;
+}
+
+.ewma-control-panel {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem 1.05rem 1.05rem;
+  border: 1px solid rgba(45, 212, 191, 0.12);
+  border-radius: 1.15rem;
+  background:
+    linear-gradient(180deg, rgba(9, 20, 21, 0.9) 0%, rgba(7, 12, 14, 0.94) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 18px 36px rgba(0, 0, 0, 0.18);
+}
+
+.ewma-control-panel--card {
+  gap: 0.72rem;
+  margin-top: 0.85rem;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ewma-control-panel--card .ewma-control-presets {
+  justify-content: flex-start;
+}
+
+.ewma-control-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ewma-control-summary {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.ewma-control-label {
+  color: #87a59f;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ewma-control-value {
+  color: #e8fffb;
+  font-family: 'Space Mono', monospace;
+  font-size: 1.02rem;
+}
+
+.ewma-control-presets {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ewma-control-preset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.62rem 0.9rem;
+  border: 1px solid rgba(45, 212, 191, 0.16);
+  border-radius: 999px;
+  background: rgba(8, 16, 18, 0.64);
+  color: #b8fff3;
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.ewma-control-preset[data-active='true'],
+.ewma-control-preset:hover,
+.ewma-control-preset:focus-visible {
+  border-color: rgba(94, 234, 212, 0.42);
+  background:
+    linear-gradient(135deg, rgba(12, 148, 136, 0.4), rgba(8, 16, 18, 0.9));
+  color: #f3fffd;
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.ewma-slider {
+  display: grid;
+  gap: 0.42rem;
+}
+
+.ewma-slider__input {
+  width: 100%;
+  margin: 0;
+  accent-color: #5eead4;
+  cursor: pointer;
+}
+
+.ewma-slider__scale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #78918c;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+}
+
+.summary-stat .ewma-slider__scale span {
+  color: inherit;
+  display: inline;
+  font-size: inherit;
 }
 
 .advanced-placeholder {
@@ -1378,6 +1647,14 @@
   .chart-window-card__value {
     text-align: left;
   }
+
+  .ewma-control-header {
+    flex-direction: column;
+  }
+
+  .ewma-control-presets {
+    justify-content: flex-start;
+  }
 }
 
 @keyframes summary-value-pulse {
@@ -1398,6 +1675,19 @@
   .entry-splash__loader {
     width: auto;
     padding: 1rem;
+  }
+
+  .chart-expandable-card--expanded {
+    top: 0.75rem;
+    width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1.5rem);
+    padding: 0.85rem;
+  }
+
+  .chart-expandable-card--expanded .market-chart-surface,
+  .chart-expandable-card--expanded .volatility-chart-surface,
+  .chart-expandable-card--expanded .drawdown-chart-surface {
+    min-height: min(66vh, 680px);
   }
 
   .entry-splash__orbit {

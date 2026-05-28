@@ -49,7 +49,11 @@ export interface MarketSeriesPoint {
 
 export interface ChartVisibleRange {
   from: string
+  fromDateOffset?: number
+  logicalFrom?: number
+  logicalTo?: number
   to: string
+  toDateOffset?: number
 }
 
 export interface MarketSeriesSummary {

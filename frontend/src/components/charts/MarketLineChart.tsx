@@ -94,8 +94,10 @@ const timeScaleOptions = {
 interface MarketLineChartProps {
   defaultVisibleFrom: string
   isRefreshing: boolean
+  isHoverLocked?: boolean
   metric: Metric
   onHoverDateChange?: (date: string | null) => void
+  onHoverLockChange?: (date: string | null, locked: boolean) => void
   onVisibleRangeChange?: (range: ChartVisibleRange | null) => void
   points: MarketSeriesPoint[]
   refreshLabel: string
@@ -110,8 +112,10 @@ type MarkerKind = 'peak' | 'trough'
 export function MarketLineChart({
   defaultVisibleFrom,
   isRefreshing,
+  isHoverLocked = false,
   metric,
   onHoverDateChange,
+  onHoverLockChange,
   onVisibleRangeChange,
   points,
   refreshLabel,
@@ -127,6 +131,8 @@ export function MarketLineChart({
   const referenceSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
   const visibleRangeKeyRef = useRef<string | null>(null)
+  const syncedRangeTimerRef = useRef<number | null>(null)
+  const isApplyingSyncedRangeRef = useRef(false)
   const crosshairSnapshotRef = useRef<HoverSnapshot | null>(null)
   const hoveredMarkerIdRef = useRef<string | null>(null)
   const pinnedMarkerIdRef = useRef<string | null>(null)
@@ -155,11 +161,19 @@ export function MarketLineChart({
       height: surface.clientHeight,
     })
 
+    if (isHoverLocked) {
+      syncLockedCrosshairPosition()
+    }
+
     syncViewportMarkers()
     syncSyncedHoverPoint()
   })
 
   const syncHoverSnapshot = useEffectEvent((param: MouseEventParams<Time>) => {
+    if (isHoverLocked) {
+      return
+    }
+
     if (hoveredMarkerIdRef.current || pinnedMarkerIdRef.current) {
       return
     }
@@ -184,6 +198,77 @@ export function MarketLineChart({
 
     setHoverSnapshot(nextSnapshot)
     onHoverDateChange?.(hoveredPoint.date)
+  })
+
+  const lockHoveredDate = useEffectEvent((point: MarketSeriesPoint) => {
+    const chart = chartRef.current
+    const lineSeries = seriesRef.current
+
+    if (!chart || !lineSeries) {
+      return
+    }
+
+    const nextSnapshot = {
+      date: point.date,
+      seriesKey,
+      value: point.value,
+    }
+
+    hoveredMarkerIdRef.current = null
+    pinnedMarkerIdRef.current = null
+    setHoveredMarkerId(null)
+    setPinnedMarkerId(null)
+    crosshairSnapshotRef.current = nextSnapshot
+    setHoverSnapshot(nextSnapshot)
+    chart.setCrosshairPosition(point.value, point.time, lineSeries)
+    onHoverDateChange?.(point.date)
+    onHoverLockChange?.(point.date, true)
+  })
+
+  const unlockHoveredDate = useEffectEvent(() => {
+    const chart = chartRef.current
+
+    hoveredMarkerIdRef.current = null
+    pinnedMarkerIdRef.current = null
+    setHoveredMarkerId(null)
+    setPinnedMarkerId(null)
+    crosshairSnapshotRef.current = null
+    setHoverSnapshot(null)
+    chart?.clearCrosshairPosition()
+    onHoverDateChange?.(null)
+    onHoverLockChange?.(null, false)
+  })
+
+  const handleChartClick = useEffectEvent((param: MouseEventParams<Time>) => {
+    const clickedPoint =
+      param.point && param.time ? resolveHoveredPoint(param, points) : null
+
+    if (!clickedPoint) {
+      return
+    }
+
+    lockHoveredDate(clickedPoint)
+  })
+
+  const syncLockedCrosshairPosition = useEffectEvent(() => {
+    const chart = chartRef.current
+    const lineSeries = seriesRef.current
+
+    if (!chart || !lineSeries || !syncedHoverDate) {
+      return
+    }
+
+    const matchingPoint = points.find((point) => point.date === syncedHoverDate)
+
+    if (!matchingPoint) {
+      return
+    }
+
+    chart.setCrosshairPosition(
+      matchingPoint.value,
+      matchingPoint.time,
+      lineSeries,
+    )
   })
 
   const syncViewportMarkers = useEffectEvent(() => {
@@ -224,12 +309,13 @@ export function MarketLineChart({
       return
     }
 
-    if (
-      !syncedHoverDate ||
-      crosshairSnapshotRef.current ||
-      hoveredMarkerIdRef.current ||
-      pinnedMarkerIdRef.current
-    ) {
+    const shouldSuppressSyncedPoint =
+      !isHoverLocked &&
+      (crosshairSnapshotRef.current ||
+        hoveredMarkerIdRef.current ||
+        pinnedMarkerIdRef.current)
+
+    if (!syncedHoverDate || shouldSuppressSyncedPoint) {
       setSyncedHoverPoint(null)
       return
     }
@@ -259,6 +345,15 @@ export function MarketLineChart({
     })
   })
 
+  const restoreLockedHoverVisuals = useEffectEvent(() => {
+    if (!isHoverLocked) {
+      return
+    }
+
+    syncLockedCrosshairPosition()
+    syncSyncedHoverPoint()
+  })
+
   const syncSharedVisibleRange = useEffectEvent(
     (range: ChartVisibleRange | null) => {
       if (!range || !onVisibleRangeChange) {
@@ -272,6 +367,41 @@ export function MarketLineChart({
       onVisibleRangeChange(range)
     },
   )
+
+  const unlockIfLockedDateLeavesRange = useEffectEvent(
+    (range: ChartVisibleRange | null) => {
+      if (!isHoverLocked || !syncedHoverDate || !range) {
+        return
+      }
+
+      if (syncedHoverDate < range.from || syncedHoverDate > range.to) {
+        unlockHoveredDate()
+      }
+    },
+  )
+
+  const scheduleSyncedRangeGuardRelease = useEffectEvent(() => {
+    if (syncedRangeTimerRef.current) {
+      window.clearTimeout(syncedRangeTimerRef.current)
+    }
+
+    syncedRangeTimerRef.current = window.setTimeout(() => {
+      isApplyingSyncedRangeRef.current = false
+      syncedRangeTimerRef.current = null
+    }, 160)
+  })
+
+  const suppressPointerTracking = useEffectEvent((event: Event) => {
+    if (!isHoverLocked) {
+      return
+    }
+
+    if (event instanceof MouseEvent && event.buttons !== 0) {
+      return
+    }
+
+    event.stopPropagation()
+  })
 
   useEffect(() => {
     const surface = surfaceRef.current
@@ -339,14 +469,25 @@ export function MarketLineChart({
     )
     const markers = createSeriesMarkers(lineSeries, [])
     const handleVisibleLogicalRangeChange = () => {
-      syncViewportMarkers()
-      syncSharedVisibleRange(
-        normalizeVisibleTimeRange(chart.timeScale().getVisibleRange()),
+      const visibleRange = normalizeVisibleTimeRange(
+        chart.timeScale().getVisibleRange(),
+        chart.timeScale().getVisibleLogicalRange(),
+        points,
       )
-      syncSyncedHoverPoint()
-    }
 
+      syncViewportMarkers()
+      syncSyncedHoverPoint()
+      unlockIfLockedDateLeavesRange(visibleRange)
+
+      if (isApplyingSyncedRangeRef.current) {
+        scheduleSyncedRangeGuardRelease()
+        return
+      }
+
+      syncSharedVisibleRange(visibleRange)
+    }
     chart.subscribeCrosshairMove(syncHoverSnapshot)
+    chart.subscribeClick(handleChartClick)
     chart
       .timeScale()
       .subscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange)
@@ -363,12 +504,27 @@ export function MarketLineChart({
 
     observer.observe(surface)
 
+    const handleContextMenu = (event: MouseEvent) => {
+      event.preventDefault()
+      unlockHoveredDate()
+    }
+
+    surface.addEventListener('contextmenu', handleContextMenu)
+    surface.addEventListener('pointerenter', restoreLockedHoverVisuals)
+    surface.addEventListener('mousemove', suppressPointerTracking, true)
+    surface.addEventListener('pointermove', suppressPointerTracking, true)
+
     return () => {
       observer.disconnect()
       chart.unsubscribeCrosshairMove(syncHoverSnapshot)
+      chart.unsubscribeClick(handleChartClick)
       chart
         .timeScale()
         .unsubscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange)
+      surface.removeEventListener('contextmenu', handleContextMenu)
+      surface.removeEventListener('pointerenter', restoreLockedHoverVisuals)
+      surface.removeEventListener('mousemove', suppressPointerTracking, true)
+      surface.removeEventListener('pointermove', suppressPointerTracking, true)
       markersRef.current = null
       referenceSeriesRef.current = null
       seriesRef.current = null
@@ -376,6 +532,11 @@ export function MarketLineChart({
       hoveredMarkerIdRef.current = null
       pinnedMarkerIdRef.current = null
       visibleRangeKeyRef.current = null
+      isApplyingSyncedRangeRef.current = false
+      if (syncedRangeTimerRef.current) {
+        window.clearTimeout(syncedRangeTimerRef.current)
+      }
+      syncedRangeTimerRef.current = null
       setSyncedHoverPoint(null)
       chart.remove()
     }
@@ -439,18 +600,59 @@ export function MarketLineChart({
 
     const currentRange = normalizeVisibleRange(
       chart.timeScale().getVisibleRange(),
+      chart.timeScale().getVisibleLogicalRange(),
+      points,
     )
 
     if (areVisibleRangesClose(currentRange, syncedVisibleRange)) {
       return
     }
 
-    chart.timeScale().setVisibleRange(syncedVisibleRange)
+    isApplyingSyncedRangeRef.current = true
+    applySyncedVisibleRange(chart, points, syncedVisibleRange)
+    scheduleSyncedRangeGuardRelease()
   }, [syncedVisibleRange])
 
   useEffect(() => {
     syncSyncedHoverPoint()
   }, [points, syncedHoverDate, syncSyncedHoverPoint])
+
+  useEffect(() => {
+    if (isHoverLocked) {
+      return
+    }
+
+    chartRef.current?.clearCrosshairPosition()
+  }, [isHoverLocked])
+
+  useEffect(() => {
+    if (!isHoverLocked) {
+      return
+    }
+
+    syncLockedCrosshairPosition()
+  }, [isHoverLocked, points, syncedHoverDate])
+
+  useEffect(() => {
+    if (!isHoverLocked || !syncedHoverDate) {
+      return
+    }
+
+    const matchingPoint = points.find((point) => point.date === syncedHoverDate)
+
+    if (!matchingPoint) {
+      return
+    }
+
+    const nextSnapshot = {
+      date: matchingPoint.date,
+      seriesKey,
+      value: matchingPoint.value,
+    }
+
+    crosshairSnapshotRef.current = nextSnapshot
+    setHoverSnapshot(nextSnapshot)
+  }, [isHoverLocked, points, seriesKey, syncedHoverDate])
 
   useEffect(() => {
     if (hoveredMarkerId || pinnedMarkerId) {
@@ -555,6 +757,10 @@ export function MarketLineChart({
                 type: 'spring',
               }}
               onMouseEnter={() => {
+                if (isHoverLocked) {
+                  return
+                }
+
                 hoveredMarkerIdRef.current = hotspot.id
                 setHoveredMarkerId(hotspot.id)
                 setHoverSnapshot({
@@ -566,6 +772,10 @@ export function MarketLineChart({
                 onHoverDateChange?.(hotspot.date)
               }}
               onMouseLeave={() => {
+                if (isHoverLocked) {
+                  return
+                }
+
                 if (hoveredMarkerIdRef.current === hotspot.id) {
                   hoveredMarkerIdRef.current = null
                 }
@@ -583,6 +793,10 @@ export function MarketLineChart({
                 onHoverDateChange?.(crosshairSnapshotRef.current?.date ?? null)
               }}
               onClick={() => {
+                const matchingPoint = points.find(
+                  (point) => point.date === hotspot.date,
+                )
+
                 pinnedMarkerIdRef.current = hotspot.id
                 setPinnedMarkerId(hotspot.id)
                 setHoverSnapshot({
@@ -592,6 +806,10 @@ export function MarketLineChart({
                   value: hotspot.value,
                 })
                 onHoverDateChange?.(hotspot.date)
+
+                if (matchingPoint) {
+                  lockHoveredDate(matchingPoint)
+                }
               }}
             >
               <span className="market-chart-hotspot__core"></span>
@@ -1036,6 +1254,8 @@ function buildMarkerHotspots(
 
 function normalizeVisibleRange(
   range: { from: Time; to: Time } | null,
+  logicalRange: { from: number; to: number } | null = null,
+  points: MarketSeriesPoint[] = [],
 ): ChartVisibleRange | null {
   if (!range) {
     return null
@@ -1048,10 +1268,28 @@ function normalizeVisibleRange(
     return null
   }
 
-  return {
+  const visibleRange: ChartVisibleRange = {
     from,
     to,
   }
+
+  if (logicalRange && Number.isFinite(logicalRange.from) && Number.isFinite(logicalRange.to)) {
+    visibleRange.logicalFrom = logicalRange.from
+    visibleRange.logicalTo = logicalRange.to
+
+    const fromIndex = findPointIndexByDate(points, from)
+    const toIndex = findPointIndexByDate(points, to)
+
+    if (fromIndex !== null) {
+      visibleRange.fromDateOffset = logicalRange.from - fromIndex
+    }
+
+    if (toIndex !== null) {
+      visibleRange.toDateOffset = logicalRange.to - toIndex
+    }
+  }
+
+  return visibleRange
 }
 
 function buildReferenceSeriesOptions() {
@@ -1084,13 +1322,77 @@ function areVisibleRangesClose(
     return left === right
   }
 
-  return left.from === right.from && left.to === right.to
+  const datesMatch = left.from === right.from && left.to === right.to
+  const leftLogicalFrom = left.logicalFrom
+  const leftLogicalTo = left.logicalTo
+  const rightLogicalFrom = right.logicalFrom
+  const rightLogicalTo = right.logicalTo
+  const logicalsAvailable =
+    typeof leftLogicalFrom === 'number' &&
+    typeof leftLogicalTo === 'number' &&
+    typeof rightLogicalFrom === 'number' &&
+    typeof rightLogicalTo === 'number'
+
+  if (!datesMatch || !logicalsAvailable) {
+    return datesMatch
+  }
+
+  return (
+    Math.abs(leftLogicalFrom - rightLogicalFrom) < 0.02 &&
+    Math.abs(leftLogicalTo - rightLogicalTo) < 0.02
+  )
 }
 
 function normalizeVisibleTimeRange(
   range: { from: Time; to: Time } | null,
+  logicalRange: { from: number; to: number } | null = null,
+  points: MarketSeriesPoint[] = [],
 ): ChartVisibleRange | null {
-  return normalizeVisibleRange(range)
+  return normalizeVisibleRange(range, logicalRange, points)
+}
+
+function applySyncedVisibleRange(
+  chart: IChartApi,
+  points: MarketSeriesPoint[],
+  range: ChartVisibleRange,
+) {
+  const logicalRange = buildSyncedLogicalRange(points, range)
+
+  if (logicalRange) {
+    chart.timeScale().setVisibleLogicalRange(logicalRange)
+    return
+  }
+
+  chart.timeScale().setVisibleRange(range)
+}
+
+function buildSyncedLogicalRange(
+  points: MarketSeriesPoint[],
+  range: ChartVisibleRange,
+) {
+  if (
+    typeof range.fromDateOffset !== 'number' ||
+    typeof range.toDateOffset !== 'number'
+  ) {
+    return null
+  }
+
+  const fromIndex = findPointIndexByDate(points, range.from)
+  const toIndex = findPointIndexByDate(points, range.to)
+
+  if (fromIndex === null || toIndex === null) {
+    return null
+  }
+
+  return {
+    from: fromIndex + range.fromDateOffset,
+    to: toIndex + range.toDateOffset,
+  }
+}
+
+function findPointIndexByDate(points: MarketSeriesPoint[], date: string) {
+  const index = points.findIndex((point) => point.date === date)
+  return index >= 0 ? index : null
 }
 
 function resolveMarkerHotspotOffset(kind: MarkerKind) {

@@ -44,6 +44,7 @@ def calculate_short_term_volatility(returns: pd.DataFrame) -> pd.DataFrame:
     return volatility
 
 
+
 def build_frontend_records(df: pd.DataFrame, metric: str) -> pd.DataFrame:
     return convert_to_long_records(df, metric).rename(columns={DATE: "date"})
 
@@ -51,6 +52,8 @@ def build_frontend_records(df: pd.DataFrame, metric: str) -> pd.DataFrame:
 def write_json_output(output: dict, output_path) -> None:
     with output_path.open("w", encoding="utf-8") as file:
         json.dump(output, file, indent=2)
+
+
 
 
 def save_other_risk_measures(short_term_volatility: pd.DataFrame) -> None:
@@ -91,6 +94,7 @@ def save_other_risk_measures(short_term_volatility: pd.DataFrame) -> None:
     print(f"Start date: {output['start_date']}")
     print(f"End date: {output['end_date']}")
     print(f"Number of records: {len(output['data'])}")
+
 
 ############################
 #

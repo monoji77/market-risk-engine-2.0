@@ -64,12 +64,33 @@ Live site: [market-risk-engine-2-0.vercel.app](https://market-risk-engine-2-0.ve
 - Interactive market visualizations for close price, close returns, and close log-returns
 - Drawdown chart linked to the same visible range as the main market chart
 - Daily short term volatility chart with synchronized zoom, crosshair linking, and peak/trough annotations
-- Summary cards for net move and daily short term volatility, including crosshair-driven updates
+- EWMA volatility chart and risk card with frontend lambda controls, including `Long term (0.94)`, `Short term (0.30)`, and custom slider input
+- Summary cards for net move, drawdown, daily short term volatility, and EWMA volatility, including crosshair-driven updates
 - 95% confidence range interpretation for daily volatility under normal market conditions
 - Asset and series switching with frontend-side buffering and transition effects
 - FastAPI backend for serving frontend-ready JSON payloads from both market and advanced-metrics artifacts
 - Static artifact path through `frontend/public/market_visualizations.json` and `frontend/public/other_risk_measures.json` for lightweight deployment
 - Scheduled GitHub Actions workflow to refresh market data and commit updated artifacts
+
+## EWMA Volatility
+
+The Advanced view includes an Exponentially Weighted Moving Average (EWMA) volatility series. The implementation follows the recursive variance update:
+
+```text
+sigma_t^2 = lambda * sigma_{t-1}^2 + (1 - lambda) * R_{t-1}^2
+```
+
+Where:
+
+- `lambda` controls how quickly past information decays
+- higher `lambda` values retain longer memory and produce a smoother volatility path
+- lower `lambda` values react faster to recent return shocks
+
+In the current frontend, users can:
+
+- switch between predefined `Long term` and `Short term` lambda presets
+- fine-tune `lambda` directly from the EWMA risk card with a horizontal slider
+- compare the EWMA curve against the other synchronized Advanced charts under the same visible window and crosshair date
 
 ## Tech Stack
 
@@ -143,7 +164,7 @@ If you want the frontend to call the FastAPI backend directly, set `VITE_API_BAS
 | `cd frontend && npm run preview` | Serves the production frontend build locally |
 | `python backend/01_read_data.py` | Downloads and refreshes source market CSVs |
 | `python backend/02_build_market_visualizations.py` | Builds market and drawdown JSON artifacts |
-| `python backend/03_calculate_other_risk_measures.py` | Builds advanced risk metrics, including daily short term volatility |
+| `python backend/03_calculate_other_risk_measures.py` | Builds advanced risk metrics artifacts, including daily short term volatility inputs used by the Advanced frontend view |
 | `uvicorn api.main:app --reload --app-dir backend` | Runs the FastAPI backend locally |
 
 ## Deployment
@@ -162,13 +183,16 @@ This repository currently supports:
 
 The daily workflow in `.github/workflows/daily-finance-data.yml` refreshes source data, rebuilds artifacts, and commits updated `backend/data` and `backend/artifacts` outputs automatically.
 
-## Future works
+## Future Work
 
 The current UI still marks the following items as `TO BE IMPLEMENTED`:
 
-- Extend the advanced metrics pipeline in `backend/03_calculate_other_risk_measures.py` with additional risk measures
-- Historical VaR using a rolling 100-day historical window for daily VaR estimation
-- Historical ES using the same rolling historical framework
-- CAGR as an additional long-horizon performance metric
+- Extend the advanced metrics pipeline in `backend/03_calculate_other_risk_measures.py` with a broader library of production-style risk measures
+- Historical VaR using a rolling historical window for daily VaR estimation
+- Historical ES using the same historical loss distribution as the VaR window
+- Historical VaR / ES visualization cards and charts inside the Advanced workflow
+- VaR / ES backtesting to compare realized breaches against model expectations
+- Additional stress testing and scenario-analysis modules for concentrated market shocks
+- CAGR and other longer-horizon performance and risk-adjusted return metrics
 - Portfolio Lab for building custom portfolios inside the application
-- Automated risk measures for the upcoming portfolio risk workflow
+- Automated portfolio risk measures for the upcoming portfolio workflow
