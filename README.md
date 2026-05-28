@@ -1,6 +1,6 @@
 # Market Risk Engine 2.0
 
-![Market Risk Engine 2.0 thumbnail](assets/thumbnail.png)
+![Market Risk Engine 2.0 thumbnail](assets/market_risk_engine_2_0_demo.gif)
 
 ![React](https://img.shields.io/badge/React-19-20232A?logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
