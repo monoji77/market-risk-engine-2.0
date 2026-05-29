@@ -32,10 +32,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run finance data script
+      - name: Refresh market data and frontend artifacts
         run: |
-          python backend/01_read_data.py
-          python backend/02_build_market_visualizations.py
+          python -m backend.01_read_data
+          python -m backend.02_build_market_visualizations
+          python -m backend.03_calculate_other_risk_measures
 
 
       - name: Commit and push updated data
@@ -43,7 +44,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add backend/data backend/artifacts frontend/public/market_visualizations.json
+          git add backend/data backend/artifacts frontend/public_app
 
           if git diff --cached --quiet; then
             echo "No data changes to commit."

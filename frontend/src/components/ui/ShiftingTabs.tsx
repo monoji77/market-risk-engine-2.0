@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import type { FocusEvent, ReactNode } from 'react'
+import type { CSSProperties, FocusEvent, ReactNode } from 'react'
 import { useEffect, useId, useRef, useState } from 'react'
 import { InfoTooltip } from './InfoTooltip'
 
@@ -17,6 +17,7 @@ interface ShiftingTabsProps<T extends string> {
   options: ShiftingTabOption<T>[]
   searchPlaceholder?: string
   value: T
+  visibleOptionCount?: number
 }
 
 export function ShiftingTabs<T extends string>({
@@ -27,6 +28,7 @@ export function ShiftingTabs<T extends string>({
   options,
   searchPlaceholder,
   value,
+  visibleOptionCount,
 }: ShiftingTabsProps<T>) {
   const layoutId = useId()
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -47,6 +49,16 @@ export function ShiftingTabs<T extends string>({
       ?.value ??
     filteredOptions[0]?.value ??
     null
+  const optionMinHeightRem = 4.65
+  const optionGapRem = 0.45
+  const optionsListStyle: CSSProperties | undefined =
+    visibleOptionCount && visibleOptionCount > 0
+      ? {
+          maxHeight: `calc(${visibleOptionCount} * ${optionMinHeightRem}rem + ${
+            Math.max(visibleOptionCount - 1, 0) * optionGapRem
+          }rem)`,
+        }
+      : undefined
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -101,7 +113,6 @@ export function ShiftingTabs<T extends string>({
 
       <div
         className="shifting-tabs__surface"
-        onMouseEnter={openDropdown}
         onMouseLeave={closeDropdown}
         onFocusCapture={openDropdown}
       >
@@ -112,6 +123,7 @@ export function ShiftingTabs<T extends string>({
           aria-haspopup="listbox"
           whileHover={{ y: -1 }}
           whileTap={{ scale: 0.99 }}
+          onMouseEnter={openDropdown}
           onClick={openDropdown}
         >
           <span className="shifting-tabs__trigger-copy">
@@ -133,86 +145,97 @@ export function ShiftingTabs<T extends string>({
 
         <AnimatePresence>
           {isOpen ? (
-            <motion.div
-              className="shifting-tabs__dropdown"
-              role="listbox"
-              aria-label={label}
-              initial={{ opacity: 0, y: -10, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -8, scale: 0.98 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
-            >
-              <div className="shifting-tabs__search-shell">
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  className="shifting-tabs__search"
-                  placeholder={searchPlaceholder ?? `Search ${label.toLowerCase()}`}
-                  value={searchValue}
-                  onChange={(event) => setSearchValue(event.target.value)}
-                  onClick={(event) => event.stopPropagation()}
-                />
-              </div>
+            <>
+              <div
+                aria-hidden="true"
+                className="shifting-tabs__hover-bridge"
+              ></div>
+              <motion.div
+                className="shifting-tabs__dropdown"
+                role="listbox"
+                aria-label={label}
+                initial={{ opacity: 0, y: -10, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+              >
+                <div className="shifting-tabs__search-shell">
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    className="shifting-tabs__search"
+                    placeholder={searchPlaceholder ?? `Search ${label.toLowerCase()}`}
+                    value={searchValue}
+                    onChange={(event) => setSearchValue(event.target.value)}
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                </div>
 
-              {filteredOptions.length ? (
-                filteredOptions.map((option) => {
-                const isSelected = option.value === value
-                const isHighlighted = option.value === activeHighlightValue
-
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    className="shifting-tabs__option"
-                    data-selected={isSelected}
-                    onMouseEnter={() => setHighlightedValue(option.value)}
-                    onFocus={() => setHighlightedValue(option.value)}
-                    onClick={() => {
-                      onChange(option.value)
-                      closeDropdown()
-                    }}
+                {filteredOptions.length ? (
+                  <div
+                    className="shifting-tabs__options"
+                    style={optionsListStyle}
                   >
-                    {isHighlighted ? (
-                      <motion.span
-                        layoutId={layoutId}
-                        className="shifting-tabs__highlight"
-                        transition={{
-                          damping: 30,
-                          stiffness: 360,
-                          type: 'spring',
-                        }}
-                      >
-                        <motion.span
-                          className="shifting-tabs__highlight-sheen"
-                          initial={{ opacity: 0.36, x: '-16%' }}
-                          animate={{ opacity: 0.6, x: '14%' }}
-                          transition={{ duration: 0.42, ease: 'easeOut' }}
-                        ></motion.span>
-                      </motion.span>
-                    ) : null}
+                    {filteredOptions.map((option) => {
+                      const isSelected = option.value === value
+                      const isHighlighted = option.value === activeHighlightValue
 
-                    <span className="shifting-tabs__option-text">
-                      <span className="shifting-tabs__option-label">
-                        {option.label}
-                      </span>
-                      {option.description ? (
-                        <span className="shifting-tabs__option-description">
-                          {option.description}
-                        </span>
-                      ) : null}
-                    </span>
-                    {isSelected ? (
-                      <span className="shifting-tabs__option-indicator"></span>
-                    ) : null}
-                  </button>
-                )
-                })
-              ) : (
-                <div className="shifting-tabs__empty">No matching results</div>
-              )}
-            </motion.div>
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          className="shifting-tabs__option"
+                          data-selected={isSelected}
+                          onMouseEnter={() => setHighlightedValue(option.value)}
+                          onFocus={() => setHighlightedValue(option.value)}
+                          onClick={() => {
+                            onChange(option.value)
+                            closeDropdown()
+                          }}
+                        >
+                          {isHighlighted ? (
+                            <motion.span
+                              layoutId={layoutId}
+                              className="shifting-tabs__highlight"
+                              transition={{
+                                damping: 30,
+                                stiffness: 360,
+                                type: 'spring',
+                              }}
+                            >
+                              <motion.span
+                                className="shifting-tabs__highlight-sheen"
+                                initial={{ opacity: 0.36, x: '-16%' }}
+                                animate={{ opacity: 0.6, x: '14%' }}
+                                transition={{ duration: 0.42, ease: 'easeOut' }}
+                              ></motion.span>
+                            </motion.span>
+                          ) : null}
+
+                          <span className="shifting-tabs__option-text">
+                            <span className="shifting-tabs__option-label">
+                              {option.label}
+                            </span>
+                            {option.description ? (
+                              <span className="shifting-tabs__option-description">
+                                {option.description}
+                              </span>
+                            ) : null}
+                          </span>
+                          {isSelected ? (
+                            <span className="shifting-tabs__option-indicator"></span>
+                          ) : null}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="shifting-tabs__empty">No matching results</div>
+                )}
+              </motion.div>
+            </>
           ) : null}
         </AnimatePresence>
       </div>

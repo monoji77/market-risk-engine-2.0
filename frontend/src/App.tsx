@@ -16,9 +16,10 @@ import { CountUpValue } from './components/ui/CountUpValue'
 import { InfoTooltip } from './components/ui/InfoTooltip'
 import ShinyText from './components/ui/ShinyText'
 import { ShiftingTabs } from './components/ui/ShiftingTabs'
-import { loadMarketDataset } from './lib/market-data'
+import { loadMarketCatalog, loadTickerDataset } from './lib/market-data'
 import type {
   ChartVisibleRange,
+  MarketCatalogTicker,
   MarketDataset,
   MarketSeriesPoint,
   Metric,
@@ -46,13 +47,27 @@ const metricMeta = {
   { chartLabel: string; label: string; tabLabel: string }
 >
 
-const assetMeta: Record<string, string> = {
-  AAPL: 'Apple',
-  AMZN: 'Amazon',
-  GOOGL: 'Alphabet',
-  MSFT: 'Microsoft',
-  SPY: 'SPDR S&P 500 ETF',
-  TSLA: 'Tesla',
+const catalogDescriptionFallbacks: Partial<Record<string, string>> = {
+  '^GSPC': 'S&P 500 Index',
+}
+
+function formatCatalogDescription(entry: MarketCatalogTicker) {
+  const name = entry.name?.trim()
+  const sector = entry.sector?.trim()
+
+  if (name && sector) {
+    return `${name} | ${sector}`
+  }
+
+  if (name) {
+    return name
+  }
+
+  if (sector) {
+    return sector
+  }
+
+  return catalogDescriptionFallbacks[entry.ticker] ?? ''
 }
 
 const chartFocusStartDate = '2021-01-01'
@@ -89,8 +104,24 @@ type ExpandedChartId =
   | 'advanced-drawdown'
   | 'advanced-volatility'
   | 'advanced-ewma'
+type AdvancedChartKey = 'returns' | 'drawdown' | 'volatility' | 'ewma'
+
+const advancedChartExpansionIds = {
+  returns: 'advanced-returns',
+  drawdown: 'advanced-drawdown',
+  volatility: 'advanced-volatility',
+  ewma: 'advanced-ewma',
+} satisfies Record<AdvancedChartKey, ExpandedChartId>
+
+const defaultAdvancedChartVisibility = {
+  returns: true,
+  drawdown: true,
+  volatility: true,
+  ewma: true,
+} satisfies Record<AdvancedChartKey, boolean>
 
 function App() {
+  const [catalog, setCatalog] = useState<MarketCatalogTicker[]>([])
   const [dataset, setDataset] = useState<MarketDataset | null>(null)
   const [selectedTicker, setSelectedTicker] = useState('AAPL')
   const [selectedMetric, setSelectedMetric] = useState<Metric>('close')
@@ -115,7 +146,11 @@ function App() {
   const [isTopbarScrolled, setIsTopbarScrolled] = useState(false)
   const [expandedChartId, setExpandedChartId] =
     useState<ExpandedChartId | null>(null)
+  const [advancedChartVisibility, setAdvancedChartVisibility] = useState(
+    defaultAdvancedChartVisibility,
+  )
   const refreshTimerRef = useRef<number | null>(null)
+  const tickerLoadRequestIdRef = useRef(0)
   const advancedRefreshTimerRef = useRef<number | null>(null)
   const volatilityCardPulseFrameRef = useRef<number | null>(null)
   const volatilityCardPulseTimerRef = useRef<number | null>(null)
@@ -206,25 +241,36 @@ function App() {
 
     async function hydrate() {
       try {
-        const loadedDataset = await loadMarketDataset()
+        const loadedCatalog = await loadMarketCatalog()
 
         if (isDisposed) {
           return
         }
 
-        setDataset(loadedDataset)
-        const initialTicker = loadedDataset.tickers.includes('AAPL')
+        const initialTicker = loadedCatalog.tickers.some(
+          (ticker) => ticker.ticker === 'AAPL',
+        )
           ? 'AAPL'
-          : loadedDataset.tickers[0] ?? 'AAPL'
-        const initialMetric = loadedDataset.metrics.includes('close')
+          : loadedCatalog.default_ticker ||
+            loadedCatalog.tickers[0]?.ticker ||
+            'AAPL'
+        const initialMetric = loadedCatalog.metrics.includes('close')
           ? 'close'
-          : loadedDataset.metrics[0] ?? 'close'
+          : loadedCatalog.metrics[0] ?? 'close'
+        const loadedDataset = await loadTickerDataset(initialTicker)
 
+        if (isDisposed) {
+          return
+        }
+
+        setCatalog(loadedCatalog.tickers)
+        setDataset(loadedDataset)
         setSelectedTicker(initialTicker)
         setActiveTicker(initialTicker)
         setSelectedMetric(initialMetric)
         setOverviewSelectedMetric(initialMetric)
         setActiveMetric(initialMetric)
+        setError(null)
       } catch (loadError) {
         if (!isDisposed) {
           const message =
@@ -249,11 +295,49 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!dataset) {
+    if (isLoading || selectedTicker === activeTicker) {
       return
     }
 
-    if (selectedTicker === activeTicker && selectedMetric === activeMetric) {
+    let isDisposed = false
+    const requestId = tickerLoadRequestIdRef.current + 1
+    tickerLoadRequestIdRef.current = requestId
+
+    async function loadSelectedTickerDataset() {
+      try {
+        setError(null)
+        const loadedDataset = await loadTickerDataset(selectedTicker)
+
+        if (isDisposed || requestId !== tickerLoadRequestIdRef.current) {
+          return
+        }
+
+        setDataset(loadedDataset)
+        setActiveTicker(selectedTicker)
+      } catch (loadError) {
+        if (isDisposed || requestId !== tickerLoadRequestIdRef.current) {
+          return
+        }
+
+        const message =
+          loadError instanceof Error
+            ? loadError.message
+            : `Unable to load ticker payload for ${selectedTicker}.`
+
+        setError(message)
+        setSelectedTicker(activeTicker)
+      }
+    }
+
+    loadSelectedTickerDataset()
+
+    return () => {
+      isDisposed = true
+    }
+  }, [activeTicker, isLoading, selectedTicker])
+
+  useEffect(() => {
+    if (!dataset || selectedMetric === activeMetric) {
       return
     }
 
@@ -262,7 +346,6 @@ function App() {
     }
 
     refreshTimerRef.current = window.setTimeout(() => {
-      setActiveTicker(selectedTicker)
       setActiveMetric(selectedMetric)
       refreshTimerRef.current = null
     }, 1500)
@@ -273,7 +356,7 @@ function App() {
         refreshTimerRef.current = null
       }
     }
-  }, [activeMetric, activeTicker, dataset, selectedMetric, selectedTicker])
+  }, [activeMetric, dataset, selectedMetric])
 
   const currentSeries = dataset?.series[activeTicker]?.[activeMetric] ?? null
   const currentReturnsSeries = dataset?.series[activeTicker]?.returns ?? null
@@ -384,6 +467,11 @@ function App() {
       ? !isTickerRefreshing && !isAdvancedReturnsBuffering
       : !isRefreshing)
   const startAdvancedCountUp = startCountUp && !isAdvancedVolatilityBuffering
+  const hasVisibleAdvancedCharts =
+    advancedChartVisibility.returns ||
+    advancedChartVisibility.drawdown ||
+    advancedChartVisibility.volatility ||
+    advancedChartVisibility.ewma
 
   const returnsChartTooltip = (
     <div className="info-tooltip__stack">
@@ -616,6 +704,20 @@ function App() {
     setExpandedChartId((current) => (current === nextChartId ? null : nextChartId))
   }
 
+  function handleAdvancedChartVisibilityToggle(chartKey: AdvancedChartKey) {
+    if (
+      advancedChartVisibility[chartKey] &&
+      expandedChartId === advancedChartExpansionIds[chartKey]
+    ) {
+      setExpandedChartId(null)
+    }
+
+    setAdvancedChartVisibility((current) => ({
+      ...current,
+      [chartKey]: !current[chartKey],
+    }))
+  }
+
   if (!dataset && !isLoading && error) {
     // keep the normal UI path below; this branch only avoids nullability noise
   }
@@ -769,12 +871,13 @@ function App() {
                         </p>
                       </div>
                     }
-                    options={(dataset?.tickers ?? []).map((ticker) => ({
-                      description: assetMeta[ticker],
-                      label: ticker,
-                      value: ticker,
+                    options={catalog.map((entry) => ({
+                      description: formatCatalogDescription(entry),
+                      label: entry.ticker,
+                      value: entry.ticker,
                     }))}
                     searchPlaceholder="Search asset"
+                    visibleOptionCount={5}
                     value={selectedTicker}
                     onChange={setSelectedTicker}
                   />
@@ -807,7 +910,7 @@ function App() {
                   </div>
                 ) : null}
 
-                {!isLoading && error ? (
+                {!isLoading && error && !dataset ? (
                   <div className="error-panel">
                     <p className="section-eyebrow">Data error</p>
                     <h2>Unable to initialize the market visualization layer</h2>
@@ -817,57 +920,106 @@ function App() {
 
                 {!isLoading && dataset && displaySeries && currentSummary ? (
                   <>
-                    <div className="visualizer-body">
-                      <div className="summary-rail">
-                        <div className="summary-nav-card">
-                          <nav
-                            className="chart-nav chart-nav--summary"
-                            aria-label="Market chart views"
+                    <div className="visualizer-guidance">
+                      <div className="summary-nav-card">
+                        <nav
+                          className="chart-nav chart-nav--summary"
+                          aria-label="Market chart views"
+                        >
+                          <button
+                            type="button"
+                            className="chart-nav__link"
+                            data-active={chartView === 'overview'}
+                            onClick={() => handleChartViewChange('overview')}
                           >
-                            <button
-                              type="button"
-                              className="chart-nav__link"
-                              data-active={chartView === 'overview'}
-                              onClick={() => handleChartViewChange('overview')}
-                            >
-                              Overview
-                            </button>
-                            <button
-                              type="button"
-                              className="chart-nav__link"
-                              data-active={chartView === 'advanced'}
-                              onClick={() => handleChartViewChange('advanced')}
-                            >
-                              Advanced
-                            </button>
-                          </nav>
+                            Overview
+                          </button>
+                          <button
+                            type="button"
+                            className="chart-nav__link"
+                            data-active={chartView === 'advanced'}
+                            onClick={() => handleChartViewChange('advanced')}
+                          >
+                            Advanced
+                          </button>
+                        </nav>
+                      </div>
+                    </div>
+
+                    <div className="visualizer-toolbar-row">
+                      <div className="chart-instructions-card">
+                        <ol className="chart-instructions-card__list">
+                          <li>
+                            Hover mouse on the chart to get risk values for
+                            hovered dates
+                          </li>
+                          <li>
+                            Left-click within the chart to lock a date of
+                            interest
+                          </li>
+                          <li>
+                            Right-click within the chart* to unlock the date and
+                            enable dynamic viewing again
+                          </li>
+                          {chartView === 'advanced' ? (
+                            <li>
+                              Toggle the toggle bar to deactivate or activate the
+                              charts
+                            </li>
+                          ) : null}
+                        </ol>
+                      </div>
+                      <div className="chart-toolbar">
+                        <div className="chart-window-card">
+                          <span className="chart-window-card__label">Window</span>
+                          <strong className="chart-window-card__value">
+                            {formatSingleDate(visibleWindowStartDate)} -{' '}
+                            {formatSingleDate(visibleWindowEndDate)}
+                          </strong>
                         </div>
+                      </div>
+                    </div>
+
+                    <div className="visualizer-body" data-chart-view={chartView}>
+                      <div className="summary-rail">
                         <div className="market-summary">
                           <div className="summary-stat summary-stat--net-move">
                             <div className="summary-stat__heading">
-                              <span className="summary-stat__title summary-stat__title--net-move">
-                                Net move
-                              </span>
-                              {yearToDateMove ? (
-                                <InfoTooltip
-                                  label="Net move details"
-                                  content={
-                                    <div className="info-tooltip__stack">
-                                      <p>
-                                        Year-to-date change in the selected series
-                                        from the first available market observation
-                                        in the year of the current crosshair date
-                                        through that reference date.
-                                      </p>
-                                      <span className="info-tooltip__timestamp">
-                                        Start timestamp:{' '}
-                                        {formatSingleDate(yearToDateMove.startDate)}
-                                      </span>
-                                      <span className="info-tooltip__timestamp">
-                                        End timestamp:{' '}
-                                        {formatSingleDate(yearToDateMove.endDate)}
-                                      </span>
-                                    </div>
+                              <div className="summary-stat__heading-copy">
+                                <span className="summary-stat__title summary-stat__title--net-move">
+                                  Net move
+                                </span>
+                                {yearToDateMove ? (
+                                  <InfoTooltip
+                                    label="Net move details"
+                                    content={
+                                      <div className="info-tooltip__stack">
+                                        <p>
+                                          Year-to-date change in the selected
+                                          series from the first available market
+                                          observation in the year of the current
+                                          crosshair date through that reference
+                                          date.
+                                        </p>
+                                        <span className="info-tooltip__timestamp">
+                                          Start timestamp:{' '}
+                                          {formatSingleDate(yearToDateMove.startDate)}
+                                        </span>
+                                        <span className="info-tooltip__timestamp">
+                                          End timestamp:{' '}
+                                          {formatSingleDate(yearToDateMove.endDate)}
+                                        </span>
+                                      </div>
+                                    }
+                                  />
+                                ) : null}
+                              </div>
+                              {chartView === 'advanced' ? (
+                                <ChartVisibilityToggle
+                                  isVisible={advancedChartVisibility.returns}
+                                  label="close returns"
+                                  onToggle={() =>
+                                    handleAdvancedChartVisibilityToggle('returns')
                                   }
                                 />
                               ) : null}
@@ -892,16 +1044,27 @@ function App() {
 
                           <div className="summary-stat summary-stat--volatility">
                             <div className="summary-stat__heading">
-                              <span className="summary-stat__title summary-stat__title--volatility">
-                                Drawdown
-                              </span>
-                              <InfoTooltip
-                                label="Drawdown details"
-                                content={drawdownTooltip}
-                                align="start"
-                                side="right"
-                                sideOffset={6}
-                              />
+                              <div className="summary-stat__heading-copy">
+                                <span className="summary-stat__title summary-stat__title--volatility">
+                                  Drawdown
+                                </span>
+                                <InfoTooltip
+                                  label="Drawdown details"
+                                  content={drawdownTooltip}
+                                  align="start"
+                                  side="right"
+                                  sideOffset={6}
+                                />
+                              </div>
+                              {chartView === 'advanced' ? (
+                                <ChartVisibilityToggle
+                                  isVisible={advancedChartVisibility.drawdown}
+                                  label="drawdown"
+                                  onToggle={() =>
+                                    handleAdvancedChartVisibilityToggle('drawdown')
+                                  }
+                                />
+                              ) : null}
                             </div>
                             <strong
                               className={buildDeltaClassName(activeDrawdownPoint?.value)}
@@ -925,15 +1088,26 @@ function App() {
                             <>
                               <div className="summary-stat summary-stat--volatility">
                                 <div className="summary-stat__heading">
-                                  <span className="summary-stat__title summary-stat__title--volatility">
-                                    Daily short term volatility
-                                  </span>
-                                  <InfoTooltip
-                                    label="Daily short term volatility details"
-                                    content={shortTermVolatilityTooltip}
-                                    align="start"
-                                    side="right"
-                                    sideOffset={6}
+                                  <div className="summary-stat__heading-copy">
+                                    <span className="summary-stat__title summary-stat__title--volatility">
+                                      Daily short term volatility
+                                    </span>
+                                    <InfoTooltip
+                                      label="Daily short term volatility details"
+                                      content={shortTermVolatilityTooltip}
+                                      align="start"
+                                      side="right"
+                                      sideOffset={6}
+                                    />
+                                  </div>
+                                  <ChartVisibilityToggle
+                                    isVisible={advancedChartVisibility.volatility}
+                                    label="daily short term volatility"
+                                    onToggle={() =>
+                                      handleAdvancedChartVisibilityToggle(
+                                        'volatility',
+                                      )
+                                    }
                                   />
                                 </div>
                                 <strong>
@@ -965,15 +1139,24 @@ function App() {
 
                               <div className="summary-stat summary-stat--volatility summary-stat--ewma">
                                 <div className="summary-stat__heading">
-                                  <span className="summary-stat__title summary-stat__title--volatility">
-                                    EWMA volatility
-                                  </span>
-                                  <InfoTooltip
-                                    label="EWMA volatility details"
-                                    content={ewmaVolatilityTooltip}
-                                    align="start"
-                                    side="right"
-                                    sideOffset={6}
+                                  <div className="summary-stat__heading-copy">
+                                    <span className="summary-stat__title summary-stat__title--volatility">
+                                      EWMA volatility
+                                    </span>
+                                    <InfoTooltip
+                                      label="EWMA volatility details"
+                                      content={ewmaVolatilityTooltip}
+                                      align="start"
+                                      side="right"
+                                      sideOffset={6}
+                                    />
+                                  </div>
+                                  <ChartVisibilityToggle
+                                    isVisible={advancedChartVisibility.ewma}
+                                    label="ewma volatility"
+                                    onToggle={() =>
+                                      handleAdvancedChartVisibilityToggle('ewma')
+                                    }
                                   />
                                 </div>
                                 <span className="summary-stat__meta">
@@ -1059,16 +1242,6 @@ function App() {
                       </div>
 
                       <div className="chart-panel chart-stack">
-                        <div className="chart-toolbar">
-                          <div className="chart-window-card">
-                            <span className="chart-window-card__label">Window</span>
-                            <strong className="chart-window-card__value">
-                              {formatSingleDate(visibleWindowStartDate)} -{' '}
-                              {formatSingleDate(visibleWindowEndDate)}
-                            </strong>
-                          </div>
-                        </div>
-
                         <AnimatePresence mode="wait" initial={false}>
                           {chartView === 'overview' ? (
                             <motion.div
@@ -1143,54 +1316,30 @@ function App() {
                               transition={{ duration: 0.24, ease: 'easeOut' }}
                             >
                               <div className="advanced-chart-grid">
-                                <ExpandableChartCard
-                                  className="advanced-chart-slot"
-                                  expanded={expandedChartId === 'advanced-returns'}
-                                  label={`${activeTicker} close returns`}
-                                  onToggle={() =>
-                                    handleExpandedChartToggle('advanced-returns')
-                                  }
-                                >
-                                  <div className="advanced-chart-copy">
-                                    <div className="advanced-chart-title-row">
-                                      <span className="advanced-chart-title">
-                                        Close returns
-                                      </span>
-                                      <InfoTooltip
-                                        label="Close returns details"
-                                        content={returnsChartTooltip}
-                                      />
-                                    </div>
-                                  </div>
-                                  <MarketLineChart
-                                    ticker={activeTicker}
-                                    metric="returns"
-                                  points={currentReturnsPoints}
-                                  defaultVisibleFrom={chartFocusStartDate}
-                                  rangeResetKey={activeTicker}
-                                  isRefreshing={isAdvancedReturnsChartRefreshing}
-                                  isHoverLocked={isHoverDateLocked}
-                                  onHoverDateChange={handleSharedHoverDateChange}
-                                  onHoverLockChange={handleSharedHoverLockChange}
-                                  onVisibleRangeChange={handleSharedVisibleRangeChange}
-                                  refreshLabel={`${selectedTicker} close returns`}
-                                  syncedHoverDate={sharedHoverDate}
-                                  syncedVisibleRange={sharedVisibleRange}
-                                />
-                              </ExpandableChartCard>
-
-                                {currentDrawdownPoints.length ? (
+                                {advancedChartVisibility.returns ? (
                                   <ExpandableChartCard
                                     className="advanced-chart-slot"
-                                    expanded={expandedChartId === 'advanced-drawdown'}
-                                    label={`${activeTicker} drawdown`}
+                                    expanded={expandedChartId === 'advanced-returns'}
+                                    label={`${activeTicker} close returns`}
                                     onToggle={() =>
-                                      handleExpandedChartToggle('advanced-drawdown')
+                                      handleExpandedChartToggle('advanced-returns')
                                     }
                                   >
-                                    <DrawdownChart
+                                    <div className="advanced-chart-copy">
+                                      <div className="advanced-chart-title-row">
+                                        <span className="advanced-chart-title">
+                                          Close returns
+                                        </span>
+                                        <InfoTooltip
+                                          label="Close returns details"
+                                          content={returnsChartTooltip}
+                                        />
+                                      </div>
+                                    </div>
+                                    <MarketLineChart
                                       ticker={activeTicker}
-                                      points={currentDrawdownPoints}
+                                      metric="returns"
+                                      points={currentReturnsPoints}
                                       defaultVisibleFrom={chartFocusStartDate}
                                       rangeResetKey={activeTicker}
                                       isRefreshing={isAdvancedReturnsChartRefreshing}
@@ -1198,79 +1347,144 @@ function App() {
                                       onHoverDateChange={handleSharedHoverDateChange}
                                       onHoverLockChange={handleSharedHoverLockChange}
                                       onVisibleRangeChange={handleSharedVisibleRangeChange}
-                                      refreshLabel={`${selectedTicker} close drawdown`}
+                                      refreshLabel={`${selectedTicker} close returns`}
                                       syncedHoverDate={sharedHoverDate}
                                       syncedVisibleRange={sharedVisibleRange}
                                     />
                                   </ExpandableChartCard>
-                                ) : (
-                                  <AdvancedPlaceholder
-                                    items={[
-                                      'Generate backend drawdown measures',
-                                    ]}
-                                  />
-                                )}
+                                ) : null}
 
-                                {currentShortTermVolatilityPoints.length ? (
+                                {advancedChartVisibility.drawdown ? (
+                                  currentDrawdownPoints.length ? (
+                                    <ExpandableChartCard
+                                      className="advanced-chart-slot"
+                                      expanded={
+                                        expandedChartId === 'advanced-drawdown'
+                                      }
+                                      label={`${activeTicker} drawdown`}
+                                      onToggle={() =>
+                                        handleExpandedChartToggle(
+                                          'advanced-drawdown',
+                                        )
+                                      }
+                                    >
+                                      <DrawdownChart
+                                        ticker={activeTicker}
+                                        points={currentDrawdownPoints}
+                                        defaultVisibleFrom={chartFocusStartDate}
+                                        rangeResetKey={activeTicker}
+                                        isRefreshing={
+                                          isAdvancedReturnsChartRefreshing
+                                        }
+                                        isHoverLocked={isHoverDateLocked}
+                                        onHoverDateChange={
+                                          handleSharedHoverDateChange
+                                        }
+                                        onHoverLockChange={
+                                          handleSharedHoverLockChange
+                                        }
+                                        onVisibleRangeChange={
+                                          handleSharedVisibleRangeChange
+                                        }
+                                        refreshLabel={`${selectedTicker} close drawdown`}
+                                        syncedHoverDate={sharedHoverDate}
+                                        syncedVisibleRange={sharedVisibleRange}
+                                      />
+                                    </ExpandableChartCard>
+                                  ) : (
+                                    <AdvancedPlaceholder
+                                      items={['Generate backend drawdown measures']}
+                                    />
+                                  )
+                                ) : null}
+
+                                {advancedChartVisibility.volatility ? (
+                                  currentShortTermVolatilityPoints.length ? (
+                                    <ExpandableChartCard
+                                      className="advanced-chart-slot"
+                                      expanded={
+                                        expandedChartId ===
+                                        'advanced-volatility'
+                                      }
+                                      label={`${activeTicker} daily short term volatility`}
+                                      onToggle={() =>
+                                        handleExpandedChartToggle(
+                                          'advanced-volatility',
+                                        )
+                                      }
+                                    >
+                                      <ShortTermVolatilityChart
+                                        ticker={activeTicker}
+                                        points={currentShortTermVolatilityPoints}
+                                        defaultVisibleFrom={chartFocusStartDate}
+                                        rangeResetKey={activeTicker}
+                                        isRefreshing={
+                                          isAdvancedVolatilityChartRefreshing
+                                        }
+                                        isHoverLocked={isHoverDateLocked}
+                                        onHoverDateChange={
+                                          handleSharedHoverDateChange
+                                        }
+                                        onHoverLockChange={
+                                          handleSharedHoverLockChange
+                                        }
+                                        onVisibleRangeChange={
+                                          handleSharedVisibleRangeChange
+                                        }
+                                        refreshLabel={`${selectedTicker} daily short term volatility`}
+                                        syncedHoverDate={sharedHoverDate}
+                                        syncedVisibleRange={sharedVisibleRange}
+                                        tooltipContent={
+                                          shortTermVolatilityTooltip
+                                        }
+                                      />
+                                    </ExpandableChartCard>
+                                  ) : (
+                                    <AdvancedPlaceholder
+                                      items={[
+                                        'Generate backend advanced volatility measures',
+                                      ]}
+                                    />
+                                  )
+                                ) : null}
+
+                                {advancedChartVisibility.ewma ? (
                                   <ExpandableChartCard
                                     className="advanced-chart-slot"
-                                    expanded={expandedChartId === 'advanced-volatility'}
-                                    label={`${activeTicker} daily short term volatility`}
+                                    expanded={expandedChartId === 'advanced-ewma'}
+                                    label={`${activeTicker} ewma volatility`}
                                     onToggle={() =>
-                                      handleExpandedChartToggle('advanced-volatility')
+                                      handleExpandedChartToggle('advanced-ewma')
                                     }
                                   >
                                     <ShortTermVolatilityChart
                                       ticker={activeTicker}
-                                      points={currentShortTermVolatilityPoints}
+                                      points={currentEwmaVolatilityPoints}
+                                      title="EWMA volatility"
+                                      tooltipLabel="EWMA volatility details"
                                       defaultVisibleFrom={chartFocusStartDate}
                                       rangeResetKey={activeTicker}
-                                      isRefreshing={isAdvancedVolatilityChartRefreshing}
+                                      isRefreshing={isAdvancedEwmaChartRefreshing}
                                       isHoverLocked={isHoverDateLocked}
                                       onHoverDateChange={handleSharedHoverDateChange}
                                       onHoverLockChange={handleSharedHoverLockChange}
                                       onVisibleRangeChange={handleSharedVisibleRangeChange}
-                                      refreshLabel={`${selectedTicker} daily short term volatility`}
+                                      refreshLabel={`${selectedTicker} ewma volatility`}
                                       syncedHoverDate={sharedHoverDate}
                                       syncedVisibleRange={sharedVisibleRange}
-                                      tooltipContent={shortTermVolatilityTooltip}
+                                      tooltipContent={ewmaVolatilityTooltip}
+                                      visualTone="price"
                                     />
                                   </ExpandableChartCard>
-                                ) : (
-                                  <AdvancedPlaceholder
-                                    items={[
-                                      'Generate backend advanced volatility measures',
-                                    ]}
-                                  />
-                                )}
+                                ) : null}
 
-                                <ExpandableChartCard
-                                  className="advanced-chart-slot"
-                                  expanded={expandedChartId === 'advanced-ewma'}
-                                  label={`${activeTicker} ewma volatility`}
-                                  onToggle={() =>
-                                    handleExpandedChartToggle('advanced-ewma')
-                                  }
-                                >
-                                  <ShortTermVolatilityChart
-                                    ticker={activeTicker}
-                                    points={currentEwmaVolatilityPoints}
-                                    title="EWMA volatility"
-                                    tooltipLabel="EWMA volatility details"
-                                    defaultVisibleFrom={chartFocusStartDate}
-                                    rangeResetKey={activeTicker}
-                                    isRefreshing={isAdvancedEwmaChartRefreshing}
-                                    isHoverLocked={isHoverDateLocked}
-                                    onHoverDateChange={handleSharedHoverDateChange}
-                                    onHoverLockChange={handleSharedHoverLockChange}
-                                    onVisibleRangeChange={handleSharedVisibleRangeChange}
-                                    refreshLabel={`${selectedTicker} ewma volatility`}
-                                    syncedHoverDate={sharedHoverDate}
-                                    syncedVisibleRange={sharedVisibleRange}
-                                    tooltipContent={ewmaVolatilityTooltip}
-                                    visualTone="price"
-                                  />
-                                </ExpandableChartCard>
+                                {!hasVisibleAdvancedCharts ? (
+                                  <div className="advanced-chart-empty-state">
+                                    All advanced charts are hidden. Use the
+                                    toggles in the risk cards to turn charts back
+                                    on.
+                                  </div>
+                                ) : null}
                               </div>
                             </motion.div>
                           )}
@@ -1576,6 +1790,10 @@ function buildPointByDate(
   return points.find((point) => point.date === date) ?? null
 }
 
+// [29 May 2026] Chris
+// Due to feature for user to adjust lambda, we need to compute EWMA volatility 
+// on the frontend. This is faster for performance it removes the need for 
+// backend roundtrips. 
 function buildEwmaVolatilityPoints(
   points: MarketSeriesPoint[],
   lambda: number,
@@ -1675,6 +1893,36 @@ function ExpandableChartCard({
   }
 
   return content
+}
+
+interface ChartVisibilityToggleProps {
+  isVisible: boolean
+  label: string
+  onToggle: () => void
+}
+
+function ChartVisibilityToggle({
+  isVisible,
+  label,
+  onToggle,
+}: ChartVisibilityToggleProps) {
+  const nextAction = isVisible ? 'Hide' : 'Show'
+
+  return (
+    <button
+      type="button"
+      className="summary-stat__chart-toggle"
+      data-active={isVisible}
+      aria-label={`${nextAction} ${label} chart`}
+      aria-pressed={isVisible}
+      title={`${nextAction} ${label} chart`}
+      onClick={onToggle}
+    >
+      <span className="summary-stat__chart-toggle-track" aria-hidden="true">
+        <span className="summary-stat__chart-toggle-thumb"></span>
+      </span>
+    </button>
+  )
 }
 
 function buildRollingMean(

@@ -4,41 +4,41 @@ export const metricOrder = ['close', 'returns', 'log_returns'] as const
 
 export type Metric = (typeof metricOrder)[number]
 
-export interface MarketDataRow {
-  date: string
-  metric: Metric
+export type AdvancedMetric = 'daily_short_term_volatility'
+
+export interface MarketCatalogTicker {
+  name?: string | null
+  security?: string | null
+  sector?: string | null
   ticker: string
+}
+
+export interface MarketCatalogPayload {
+  default_ticker: string
+  metrics: Metric[]
+  tickers: MarketCatalogTicker[]
+}
+
+export interface MarketPointRow {
+  date: string
   value: number
 }
 
-export interface DrawdownDataRow {
-  date: string
-  ticker: string
-  value: number
-}
-
-export interface AdvancedMetricDataRow {
-  date: string
-  metric: 'daily_short_term_volatility'
-  ticker: string
-  value: number
-}
-
-export interface MarketVisualizationPayload {
-  data: MarketDataRow[]
-  drawdown_data?: DrawdownDataRow[]
+export interface MarketTickerPayload {
+  drawdown_series: MarketPointRow[]
   end_date: string
   metrics: Metric[]
+  series: Partial<Record<Metric, MarketPointRow[]>>
   start_date: string
-  tickers: string[]
+  ticker: string
 }
 
-export interface AdvancedMetricsPayload {
-  data: AdvancedMetricDataRow[]
+export interface AdvancedTickerPayload {
   end_date: string
-  metrics: string[]
+  metrics: AdvancedMetric[]
+  series: Partial<Record<AdvancedMetric, MarketPointRow[]>>
   start_date: string
-  tickers: string[]
+  ticker: string
 }
 
 export interface MarketSeriesPoint {

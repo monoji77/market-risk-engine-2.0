@@ -1,44 +1,49 @@
 import {
-  type AdvancedMetricsPayload,
+  type AdvancedTickerPayload,
   metricOrder,
+  type MarketCatalogPayload,
   type MarketDataset,
+  type MarketPointRow,
   type MarketSeriesPoint,
   type MarketSeriesSummary,
-  type MarketVisualizationPayload,
+  type MarketTickerPayload,
   type Metric,
 } from '../types/market'
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '')
-const staticMarketVisualizationUrl = `${import.meta.env.BASE_URL}market_visualizations.json`
-const staticAdvancedMetricsUrl = `${import.meta.env.BASE_URL}other_risk_measures.json`
-const marketVisualizationUrl = apiBaseUrl
-  ? `${apiBaseUrl}/api/market/visualizations`
-  : staticMarketVisualizationUrl
-const advancedMetricsUrl = apiBaseUrl
-  ? `${apiBaseUrl}/api/market/advanced-metrics`
-  : staticAdvancedMetricsUrl
+const marketCatalogUrl = `${import.meta.env.BASE_URL}market_catalog.json`
+const marketTickerBaseUrl = `${import.meta.env.BASE_URL}tickers`
+const advancedMetricsBaseUrl = `${import.meta.env.BASE_URL}advanced_metrics`
 
-let datasetPromise: Promise<MarketDataset> | null = null
+let catalogPromise: Promise<MarketCatalogPayload> | null = null
+const tickerDatasetPromiseCache = new Map<string, Promise<MarketDataset>>()
 
-export function loadMarketDataset() {
-  if (!datasetPromise) {
-    datasetPromise = getMarketDataset()
+export function loadMarketCatalog() {
+  if (!catalogPromise) {
+    catalogPromise = getMarketCatalog()
   }
 
-  return datasetPromise
+  return catalogPromise
 }
 
-async function getMarketDataset() {
-  const [payload, advancedMetricsPayload] = await Promise.all([
-    loadVisualizationPayload(),
-    loadAdvancedMetricsPayload(),
-  ])
+export function loadTickerDataset(ticker: string) {
+  const cachedPromise = tickerDatasetPromiseCache.get(ticker)
 
-  return normalizePayload(payload, advancedMetricsPayload)
+  if (cachedPromise) {
+    return cachedPromise
+  }
+
+  const nextPromise = getTickerDataset(ticker).catch((error) => {
+    tickerDatasetPromiseCache.delete(ticker)
+    throw error
+  })
+
+  tickerDatasetPromiseCache.set(ticker, nextPromise)
+
+  return nextPromise
 }
 
-async function loadVisualizationPayload() {
-  const response = await fetch(marketVisualizationUrl, {
+async function getMarketCatalog() {
+  const response = await fetch(marketCatalogUrl, {
     headers: {
       Accept: 'application/json',
     },
@@ -46,189 +51,243 @@ async function loadVisualizationPayload() {
 
   if (!response.ok) {
     throw new Error(
-      `Market visualization request failed with ${response.status}. Generate frontend/public/market_visualizations.json or set VITE_API_BASE_URL.`,
+      `Market catalog request failed with ${response.status}. Run backend/02_build_market_visualizations.py first.`,
     )
   }
 
-  const payload = (await response.json()) as MarketVisualizationPayload
-  return assertPayload(payload)
+  const payload = await parsePayloadResponse<MarketCatalogPayload>(
+    response,
+    'Market catalog',
+  )
+
+  return normalizeMarketCatalogPayload(assertMarketCatalogPayload(payload))
 }
 
-function assertPayload(payload: MarketVisualizationPayload) {
-  if (
-    !payload ||
-    !Array.isArray(payload.tickers) ||
-    !Array.isArray(payload.metrics) ||
-    !Array.isArray(payload.data)
-  ) {
-    throw new Error('Market visualization payload is malformed.')
-  }
+async function getTickerDataset(ticker: string) {
+  const [marketPayload, advancedPayload] = await Promise.all([
+    loadMarketTickerPayload(ticker),
+    loadAdvancedTickerPayload(ticker),
+  ])
 
-  return payload
+  return normalizeTickerPayload(marketPayload, advancedPayload)
 }
 
-async function loadAdvancedMetricsPayload() {
-  const response = await fetch(advancedMetricsUrl, {
+async function loadMarketTickerPayload(ticker: string) {
+  const response = await fetch(buildTickerPayloadUrl(marketTickerBaseUrl, ticker), {
     headers: {
       Accept: 'application/json',
     },
   })
 
   if (!response.ok) {
-    return null
+    throw new Error(
+      `Ticker payload request failed with ${response.status} for ${ticker}. Run backend/02_build_market_visualizations.py first.`,
+    )
   }
 
-  const payload = (await response.json()) as AdvancedMetricsPayload
-  return assertAdvancedMetricsPayload(payload)
+  const payload = await parsePayloadResponse<MarketTickerPayload>(
+    response,
+    `${ticker} market payload`,
+  )
+
+  return normalizeMarketTickerPayload(assertMarketTickerPayload(payload))
 }
 
-function assertAdvancedMetricsPayload(payload: AdvancedMetricsPayload | null) {
-  if (!payload) {
+async function loadAdvancedTickerPayload(ticker: string) {
+  const response = await fetch(
+    buildTickerPayloadUrl(advancedMetricsBaseUrl, ticker),
+    {
+      headers: {
+        Accept: 'application/json',
+      },
+    },
+  )
+
+  if (!response.ok) {
     return null
   }
 
-  if (!Array.isArray(payload.tickers) || !Array.isArray(payload.data)) {
-    throw new Error('Advanced market metrics payload is malformed.')
+  const payload = await parsePayloadResponse<AdvancedTickerPayload>(
+    response,
+    `${ticker} advanced market payload`,
+  )
+
+  return assertAdvancedTickerPayload(payload)
+}
+
+function assertMarketCatalogPayload(payload: MarketCatalogPayload) {
+  if (
+    !payload ||
+    !Array.isArray(payload.metrics) ||
+    !Array.isArray(payload.tickers)
+  ) {
+    throw new Error('Market catalog payload is malformed.')
   }
 
   return payload
 }
 
-function normalizePayload(
-  payload: MarketVisualizationPayload,
-  advancedMetricsPayload: AdvancedMetricsPayload | null,
-): MarketDataset {
-  const tickers = payload.tickers
-  const metrics = payload.metrics.filter(isMetric)
-  const series: MarketDataset['series'] = {}
-  const drawdownSeries: MarketDataset['drawdownSeries'] = {}
-  const shortTermVolatilitySeries: MarketDataset['shortTermVolatilitySeries'] = {}
-  const drawdownRows = Array.isArray(payload.drawdown_data)
-    ? payload.drawdown_data
-    : []
-  const advancedMetricRows = advancedMetricsPayload?.data ?? []
-
-  for (const ticker of tickers) {
-    series[ticker] = {}
-    drawdownSeries[ticker] = {
-      points: [],
-      summary: emptySummary(),
-    }
-    shortTermVolatilitySeries[ticker] = {
-      points: [],
-      summary: emptySummary(),
-    }
+function assertMarketTickerPayload(payload: MarketTickerPayload) {
+  if (
+    !payload ||
+    typeof payload.ticker !== 'string' ||
+    !Array.isArray(payload.metrics) ||
+    !payload.series ||
+    !Array.isArray(payload.drawdown_series)
+  ) {
+    throw new Error('Ticker market payload is malformed.')
   }
 
-  for (const row of payload.data) {
-    if (!isMetric(row.metric)) {
-      continue
-    }
+  return payload
+}
 
-    if (!series[row.ticker]) {
-      series[row.ticker] = {}
-    }
-
-    if (!series[row.ticker][row.metric]) {
-      series[row.ticker][row.metric] = {
-        points: [],
-        summary: emptySummary(),
-      }
-    }
-
-    const marketSeries = series[row.ticker][row.metric]
-
-    if (!marketSeries) {
-      continue
-    }
-
-    marketSeries.points.push({
-      date: row.date,
-      time: row.date,
-      value: row.value,
-    })
+function assertAdvancedTickerPayload(payload: AdvancedTickerPayload | null) {
+  if (!payload) {
+    return null
   }
 
-  for (const row of drawdownRows) {
-    if (!drawdownSeries[row.ticker]) {
-      drawdownSeries[row.ticker] = {
-        points: [],
-        summary: emptySummary(),
-      }
-    }
-
-    drawdownSeries[row.ticker].points.push({
-      date: row.date,
-      time: row.date,
-      value: row.value,
-    })
+  if (
+    typeof payload.ticker !== 'string' ||
+    !Array.isArray(payload.metrics) ||
+    !payload.series
+  ) {
+    throw new Error('Ticker advanced payload is malformed.')
   }
 
-  for (const row of advancedMetricRows) {
-    if (row.metric !== 'daily_short_term_volatility') {
-      continue
-    }
+  return payload
+}
 
-    if (!shortTermVolatilitySeries[row.ticker]) {
-      shortTermVolatilitySeries[row.ticker] = {
-        points: [],
-        summary: emptySummary(),
-      }
-    }
-
-    shortTermVolatilitySeries[row.ticker].points.push({
-      date: row.date,
-      time: row.date,
-      value: row.value,
-    })
+function normalizeMarketCatalogPayload(payload: MarketCatalogPayload) {
+  return {
+    ...payload,
+    metrics: payload.metrics.map(normalizeMetricIdentifier).filter(isMetric),
+    tickers: payload.tickers.map((ticker) => ({
+      ...ticker,
+      name: ticker.security ?? ticker.name ?? null,
+      security: ticker.security ?? ticker.name ?? null,
+    })),
   }
+}
 
-  for (const ticker of Object.keys(series)) {
-    for (const metric of metrics) {
-      const marketSeries = series[ticker][metric]
+function normalizeMarketTickerPayload(payload: MarketTickerPayload) {
+  const normalizedSeries = Object.entries(payload.series).reduce<
+    Partial<Record<Metric, MarketPointRow[]>>
+  >((seriesMap, [metric, rows]) => {
+    const normalizedMetric = normalizeMetricIdentifier(metric)
 
-      if (!marketSeries || marketSeries.points.length === 0) {
-        continue
-      }
-
-      marketSeries.summary = summarizeSeries(marketSeries.points)
-    }
-  }
-
-  for (const ticker of Object.keys(drawdownSeries)) {
-    const drawdownSeriesForTicker = drawdownSeries[ticker]
-
-    if (drawdownSeriesForTicker.points.length === 0) {
-      continue
+    if (rows && isMetric(normalizedMetric)) {
+      seriesMap[normalizedMetric] = rows
     }
 
-    drawdownSeriesForTicker.summary = summarizeSeries(
-      drawdownSeriesForTicker.points,
-    )
-  }
-
-  for (const ticker of Object.keys(shortTermVolatilitySeries)) {
-    const shortTermVolatilitySeriesForTicker = shortTermVolatilitySeries[ticker]
-
-    if (shortTermVolatilitySeriesForTicker.points.length === 0) {
-      continue
-    }
-
-    shortTermVolatilitySeriesForTicker.summary = summarizeSeries(
-      shortTermVolatilitySeriesForTicker.points,
-    )
-  }
+    return seriesMap
+  }, {})
 
   return {
-    drawdownSeries,
-    endDate: payload.end_date,
-    metrics,
-    rowCount: payload.data.length,
-    series,
-    shortTermVolatilitySeries,
-    startDate: payload.start_date,
-    tickers,
+    ...payload,
+    metrics: payload.metrics.map(normalizeMetricIdentifier).filter(isMetric),
+    series: normalizedSeries,
   }
+}
+
+function normalizeTickerPayload(
+  marketPayload: MarketTickerPayload,
+  advancedPayload: AdvancedTickerPayload | null,
+): MarketDataset {
+  const ticker = marketPayload.ticker
+  const metrics = marketPayload.metrics.filter(isMetric)
+  const series: MarketDataset['series'] = {
+    [ticker]: {},
+  }
+
+  let rowCount = 0
+
+  for (const metric of metrics) {
+    const metricRows = marketPayload.series[metric] ?? []
+    const marketSeries = buildSeries(metricRows)
+    rowCount += marketSeries.points.length
+
+    series[ticker][metric] = marketSeries
+  }
+
+  const drawdownMarketSeries = buildSeries(marketPayload.drawdown_series)
+  rowCount += drawdownMarketSeries.points.length
+
+  const shortTermVolatilityRows =
+    advancedPayload?.series.daily_short_term_volatility ?? []
+  const shortTermVolatilityMarketSeries = buildSeries(shortTermVolatilityRows)
+  rowCount += shortTermVolatilityMarketSeries.points.length
+
+  return {
+    drawdownSeries: {
+      [ticker]: drawdownMarketSeries,
+    },
+    endDate: marketPayload.end_date,
+    metrics,
+    rowCount,
+    series,
+    shortTermVolatilitySeries: {
+      [ticker]: shortTermVolatilityMarketSeries,
+    },
+    startDate: marketPayload.start_date,
+    tickers: [ticker],
+  }
+}
+
+function buildSeries(rows: MarketPointRow[]) {
+  const points = normalizePointRows(rows)
+
+  return {
+    points,
+    summary: points.length ? summarizeSeries(points) : emptySummary(),
+  }
+}
+
+function normalizePointRows(rows: MarketPointRow[]) {
+  return rows
+    .filter((row) => Number.isFinite(row.value))
+    .map((row) => ({
+      date: row.date,
+      time: row.date,
+      value: row.value,
+    }))
+}
+
+function buildTickerPayloadUrl(baseUrl: string, ticker: string) {
+  return `${baseUrl}/${encodeURIComponent(ticker)}.json`
+}
+
+async function parsePayloadResponse<T>(response: Response, label: string) {
+  const text = await response.text()
+
+  try {
+    return JSON.parse(text) as T
+  } catch (parseError) {
+    const sanitizedText = sanitizeNonFiniteJsonLiterals(text)
+
+    if (sanitizedText !== text) {
+      try {
+        return JSON.parse(sanitizedText) as T
+      } catch {
+        // Fall through to the structured error below.
+      }
+    }
+
+    const message =
+      parseError instanceof Error ? parseError.message : 'Unknown parse error'
+
+    throw new Error(`${label} payload is not valid JSON. ${message}`)
+  }
+}
+
+function sanitizeNonFiniteJsonLiterals(text: string) {
+  return text.replace(
+    /(:\s*)(NaN|-Infinity|Infinity)(\s*[,}\]])/g,
+    '$1null$3',
+  )
+}
+
+function normalizeMetricIdentifier(metric: string) {
+  return metric === 'Close' ? 'close' : metric
 }
 
 function summarizeSeries(points: MarketSeriesPoint[]): MarketSeriesSummary {

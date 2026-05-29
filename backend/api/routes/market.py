@@ -8,19 +8,32 @@ from fastapi import APIRouter, HTTPException, Query
 router = APIRouter(prefix="/api/market", tags=["Market"])
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
-MARKET_VISUALIZATIONS_PATH = BACKEND_DIR / "artifacts" / "market_visualizations.json"
+MARKET_VISUALIZATION_CANDIDATES = [
+    BACKEND_DIR / "artifacts" / "market_visualizations.json.tmp",
+    BACKEND_DIR / "artifacts" / "market_visualizations.json",
+]
 OTHER_RISK_MEASURES_PATH = BACKEND_DIR / "artifacts" / "other_risk_measures.json"
+
+
+def resolve_market_visualizations_path():
+    for path in MARKET_VISUALIZATION_CANDIDATES:
+        if path.exists():
+            return path
+
+    return None
 
 
 @router.get("/visualizations")
 def get_market_visualizations():
-    if not MARKET_VISUALIZATIONS_PATH.exists():
+    market_visualizations_path = resolve_market_visualizations_path()
+
+    if market_visualizations_path is None:
         raise HTTPException(
             status_code=404,
             detail="market_visualizations.json not found. Run the backend artifact script first.",
         )
 
-    with MARKET_VISUALIZATIONS_PATH.open("r", encoding="utf-8") as file:
+    with market_visualizations_path.open("r", encoding="utf-8") as file:
         return json.load(file)
 
 
@@ -29,13 +42,15 @@ def get_market_series(
     ticker: str = Query("AAPL"),
     metric: Literal["close", "returns", "log_returns"] = Query("close"),
 ):
-    if not MARKET_VISUALIZATIONS_PATH.exists():
+    market_visualizations_path = resolve_market_visualizations_path()
+
+    if market_visualizations_path is None:
         raise HTTPException(
             status_code=404,
             detail="market_visualizations.json not found.",
         )
 
-    with MARKET_VISUALIZATIONS_PATH.open("r", encoding="utf-8") as file:
+    with market_visualizations_path.open("r", encoding="utf-8") as file:
         payload = json.load(file)
 
     if ticker not in payload["tickers"]:

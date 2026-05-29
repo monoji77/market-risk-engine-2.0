@@ -42,9 +42,10 @@ Live site: [market-risk-engine-2-0.vercel.app](https://market-risk-engine-2-0.ve
 │   ├── 02_build_market_visualizations.py  # Market + drawdown artifact builder
 │   └── 03_calculate_other_risk_measures.py # Advanced metrics artifact builder
 ├── frontend/
-│   ├── public/
-│   │   ├── market_visualizations.json     # Static market artifact served by the frontend
-│   │   └── other_risk_measures.json       # Static advanced-metrics artifact served by the frontend
+│   ├── public_app/
+│   │   ├── market_catalog.json            # Frontend catalog with ticker, security, and sector metadata
+│   │   ├── tickers/                       # Per-ticker market artifacts served by the frontend
+│   │   └── advanced_metrics/              # Per-ticker advanced-metrics artifacts served by the frontend
 │   ├── src/
 │   │   ├── assets/                   # Frontend images
 │   │   ├── components/               # Charts and reusable UI
@@ -68,8 +69,9 @@ Live site: [market-risk-engine-2-0.vercel.app](https://market-risk-engine-2-0.ve
 - Summary cards for net move, drawdown, daily short term volatility, and EWMA volatility, including crosshair-driven updates
 - 95% confidence range interpretation for daily volatility under normal market conditions
 - Asset and series switching with frontend-side buffering and transition effects
+- Market catalog entries include ticker-level `security` metadata so the frontend can show descriptive asset names directly from generated JSON
 - FastAPI backend for serving frontend-ready JSON payloads from both market and advanced-metrics artifacts
-- Static artifact path through `frontend/public/market_visualizations.json` and `frontend/public/other_risk_measures.json` for lightweight deployment
+- Static artifact path through `frontend/public_app/market_catalog.json`, `frontend/public_app/tickers/`, and `frontend/public_app/advanced_metrics/` for lightweight deployment
 - Scheduled GitHub Actions workflow to refresh market data and commit updated artifacts
 
 ## EWMA Volatility
@@ -132,9 +134,9 @@ In the current frontend, users can:
 ```bash
 python -m pip install -r requirements.txt
 
-python backend/01_read_data.py
-python backend/02_build_market_visualizations.py
-python backend/03_calculate_other_risk_measures.py
+python -m backend.01_read_data
+python -m backend.02_build_market_visualizations
+python -m backend.03_calculate_other_risk_measures
 
 cd frontend
 npm install
@@ -143,8 +145,9 @@ npm run dev
 
 By default, the frontend reads the checked-in static artifacts from:
 
-- `frontend/public/market_visualizations.json`
-- `frontend/public/other_risk_measures.json`
+- `frontend/public_app/market_catalog.json`
+- `frontend/public_app/tickers/`
+- `frontend/public_app/advanced_metrics/`
 
 ### Run With Backend API
 
@@ -162,9 +165,9 @@ If you want the frontend to call the FastAPI backend directly, set `VITE_API_BAS
 | `cd frontend && npm run build` | Runs TypeScript build checks and creates the production build in `frontend/dist/` |
 | `cd frontend && npm run lint` | Runs ESLint across the frontend |
 | `cd frontend && npm run preview` | Serves the production frontend build locally |
-| `python backend/01_read_data.py` | Downloads and refreshes source market CSVs |
-| `python backend/02_build_market_visualizations.py` | Builds market and drawdown JSON artifacts |
-| `python backend/03_calculate_other_risk_measures.py` | Builds advanced risk metrics artifacts, including daily short term volatility inputs used by the Advanced frontend view |
+| `python -m backend.01_read_data` | Downloads and refreshes source market CSVs |
+| `python -m backend.02_build_market_visualizations` | Builds market catalog plus per-ticker market and drawdown JSON artifacts |
+| `python -m backend.03_calculate_other_risk_measures` | Builds per-ticker advanced risk metrics artifacts, including daily short term volatility inputs used by the Advanced frontend view |
 | `uvicorn api.main:app --reload --app-dir backend` | Runs the FastAPI backend locally |
 
 ## Deployment
@@ -181,7 +184,17 @@ This repository currently supports:
 - Vercel for the live frontend deployment
 - GitHub Actions for scheduled market data refreshes
 
-The daily workflow in `.github/workflows/daily-finance-data.yml` refreshes source data, rebuilds artifacts, and commits updated `backend/data` and `backend/artifacts` outputs automatically.
+The daily workflow in `.github/workflows/daily-finance-data.yml` refreshes source data, rebuilds artifacts, and commits updated `backend/data`, `backend/artifacts`, and `frontend/public_app` outputs automatically.
+
+It now runs the data scripts as Python modules:
+
+```bash
+python -m backend.01_read_data
+python -m backend.02_build_market_visualizations
+python -m backend.03_calculate_other_risk_measures
+```
+
+That matters because the backend scripts import `backend.utils.utils`; invoking them as modules keeps the import path stable on GitHub runners and local machines. As long as the runner can reach Yahoo Finance and the S&P 500 constituents source, GitHub Actions will repopulate fresh CSVs and rebuild the frontend-ready JSON artifacts, including the catalog fields used for ticker descriptions such as `security`.
 
 ## Future Work
 
