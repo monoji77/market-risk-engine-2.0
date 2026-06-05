@@ -14,13 +14,13 @@
 
 ## Overview
 
-This repository contains the source code for a market risk platform that combines a Python analytics backend with a React + TypeScript frontend for interactive market and risk visualization.
+This repository contains the source code for a market risk platform that combines a Python analytics pipeline with a React + TypeScript frontend for interactive market and risk visualization.
 
 `market_risk_2.0` is a follow-on build from [`Monoji77/market_risk_engine`](https://github.com/Monoji77/market_risk_engine), with the architecture redesigned around:
 
-- a dedicated backend for data preparation and analytics
+- a Blob-backed analytics pipeline for scheduled data preparation
 - a faster frontend for interactive charting and exploration
-- a cleaner path toward broader portfolio and market risk tooling
+- a hybrid deployment path where the frontend can read generated JSON directly from Azure Blob Storage
 
 Live site: [market-risk-engine-2-0.vercel.app](https://market-risk-engine-2-0.vercel.app/)
 
@@ -65,8 +65,8 @@ Live site: [market-risk-engine-2-0.vercel.app](https://market-risk-engine-2-0.ve
 - 95% confidence range interpretation for daily volatility under normal market conditions
 - Asset and series switching with frontend-side buffering and transition effects
 - Market catalog entries include ticker-level `security` metadata so the frontend can show descriptive asset names directly from generated JSON
-- FastAPI backend for serving frontend-ready JSON payloads directly from Azure Blob Storage
 - Azure Blob-backed raw-price CSVs, catalog JSON, per-ticker market payloads, and advanced metrics payloads
+- Frontend support for direct Azure Blob reads with an optional FastAPI API fallback for local or private deployments
 - Scheduled GitHub Actions workflow to refresh market data and write updated outputs to Azure Blob Storage
 
 ## EWMA Volatility
@@ -145,13 +145,20 @@ Azure Blob Storage is the only supported runtime data store. Before running the 
 - `AZURE_STORAGE_CONTAINER_ARTIFACTS`
 - `AZURE_STORAGE_CONTAINER_CACHE` optional
 
-### Run With Backend API
+For frontend runtime access, choose one of these modes:
+
+- Preferred production mode: set `VITE_AZURE_BLOB_ARTIFACTS_URL` to the full Azure Blob artifacts container URL. This can be a public container URL or a container URL with a read-only SAS query string.
+- Optional development/private mode: run the FastAPI backend and use `VITE_API_BASE_URL` or Vite's `/api` proxy.
+
+When using direct browser-to-Blob reads, make sure Azure Blob CORS allows your frontend origin for `GET`, `HEAD`, and `OPTIONS`.
+
+### Optional Backend API
 
 ```bash
 uvicorn api.main:app --reload --app-dir backend
 ```
 
-The frontend now reads market data exclusively through the FastAPI backend. For local development, you can rely on Vite's `/api` proxy or set `VITE_API_BASE_URL` to your backend origin, for example `http://127.0.0.1:8000`. If your backend is hosted separately, add its frontend origin to `CORS_ALLOWED_ORIGINS`.
+The frontend prefers `VITE_AZURE_BLOB_ARTIFACTS_URL` when it is set. If it is not set, it falls back to the FastAPI backend. For local development, you can rely on Vite's `/api` proxy or set `VITE_API_BASE_URL` to your backend origin, for example `http://127.0.0.1:8000`. If your backend is hosted separately, add its frontend origin to `CORS_ALLOWED_ORIGINS`.
 
 ## Available Commands
 
@@ -164,7 +171,7 @@ The frontend now reads market data exclusively through the FastAPI backend. For 
 | `python -m backend.01_read_data` | Downloads and refreshes source market CSVs into Azure Blob Storage |
 | `python -m backend.02_build_market_visualizations` | Builds market catalog plus per-ticker market and drawdown JSON artifacts in Azure Blob Storage |
 | `python -m backend.03_calculate_other_risk_measures` | Builds per-ticker advanced risk metrics artifacts in Azure Blob Storage |
-| `uvicorn api.main:app --reload --app-dir backend` | Runs the FastAPI backend locally |
+| `uvicorn api.main:app --reload --app-dir backend` | Runs the optional FastAPI backend locally |
 
 ## Deployment
 
@@ -181,6 +188,8 @@ This repository currently supports:
 - GitHub Actions for scheduled market data refreshes
 
 The daily workflow in `.github/workflows/daily-finance-data.yml` refreshes source data and writes updated outputs directly to Azure Blob Storage.
+
+For a frontend-only production deployment, set `VITE_AZURE_BLOB_ARTIFACTS_URL` in Vercel to the Azure Blob artifacts container URL and redeploy. The frontend will then read `market_catalog.json`, `tickers/*.json`, and `advanced_metrics/*.json` directly from Blob Storage without requiring an active FastAPI deployment.
 
 It now runs the data scripts as Python modules:
 

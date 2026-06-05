@@ -10,11 +10,22 @@ import {
   type Metric,
 } from '../types/market'
 
+const configuredBlobArtifactsUrl = normalizeBlobArtifactsUrl(
+  import.meta.env.VITE_AZURE_BLOB_ARTIFACTS_URL,
+)
 const configuredApiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
-const apiRootUrl = buildApiRootUrl(configuredApiBaseUrl)
-const marketCatalogUrl = `${apiRootUrl}/market/catalog`
-const marketTickerBaseUrl = `${apiRootUrl}/market/tickers`
-const advancedMetricsBaseUrl = `${apiRootUrl}/market/advanced-metrics`
+const apiRootUrl = configuredBlobArtifactsUrl
+  ? null
+  : buildApiRootUrl(configuredApiBaseUrl)
+const marketCatalogUrl = configuredBlobArtifactsUrl
+  ? buildBlobArtifactUrl(configuredBlobArtifactsUrl, ['market_catalog.json'])
+  : `${apiRootUrl}/market/catalog`
+const marketTickerBaseUrl = configuredBlobArtifactsUrl
+  ? null
+  : `${apiRootUrl}/market/tickers`
+const advancedMetricsBaseUrl = configuredBlobArtifactsUrl
+  ? null
+  : `${apiRootUrl}/market/advanced-metrics`
 
 let catalogPromise: Promise<MarketCatalogPayload> | null = null
 const tickerDatasetPromiseCache = new Map<string, Promise<MarketDataset>>()
@@ -53,7 +64,11 @@ async function getMarketCatalog() {
 
   if (!response.ok) {
     throw new Error(
-      `Market catalog request failed with ${response.status}. Run backend/02_build_market_visualizations.py first.`,
+      buildPayloadRequestError(
+        'Market catalog',
+        response.status,
+        'backend/02_build_market_visualizations.py',
+      ),
     )
   }
 
@@ -75,7 +90,7 @@ async function getTickerDataset(ticker: string) {
 }
 
 async function loadMarketTickerPayload(ticker: string) {
-  const response = await fetch(buildTickerPayloadUrl(marketTickerBaseUrl, ticker), {
+  const response = await fetch(buildMarketTickerPayloadUrl(ticker), {
     headers: {
       Accept: 'application/json',
     },
@@ -83,7 +98,11 @@ async function loadMarketTickerPayload(ticker: string) {
 
   if (!response.ok) {
     throw new Error(
-      `Ticker payload request failed with ${response.status} for ${ticker}. Run backend/02_build_market_visualizations.py first.`,
+      buildPayloadRequestError(
+        `Ticker payload for ${ticker}`,
+        response.status,
+        'backend/02_build_market_visualizations.py',
+      ),
     )
   }
 
@@ -96,17 +115,24 @@ async function loadMarketTickerPayload(ticker: string) {
 }
 
 async function loadAdvancedTickerPayload(ticker: string) {
-  const response = await fetch(
-    buildTickerPayloadUrl(advancedMetricsBaseUrl, ticker),
-    {
-      headers: {
-        Accept: 'application/json',
-      },
+  const response = await fetch(buildAdvancedTickerPayloadUrl(ticker), {
+    headers: {
+      Accept: 'application/json',
     },
-  )
+  })
+
+  if (response.status === 404) {
+    return null
+  }
 
   if (!response.ok) {
-    return null
+    throw new Error(
+      buildPayloadRequestError(
+        `Advanced ticker payload for ${ticker}`,
+        response.status,
+        'backend/03_calculate_other_risk_measures.py',
+      ),
+    )
   }
 
   const payload = await parsePayloadResponse<AdvancedTickerPayload>(
@@ -254,8 +280,48 @@ function normalizePointRows(rows: MarketPointRow[]) {
     }))
 }
 
-function buildTickerPayloadUrl(baseUrl: string, ticker: string) {
+function buildMarketTickerPayloadUrl(ticker: string) {
+  if (configuredBlobArtifactsUrl) {
+    return buildBlobArtifactUrl(configuredBlobArtifactsUrl, [
+      'tickers',
+      `${ticker}.json`,
+    ])
+  }
+
+  return buildApiTickerPayloadUrl(marketTickerBaseUrl, ticker)
+}
+
+function buildAdvancedTickerPayloadUrl(ticker: string) {
+  if (configuredBlobArtifactsUrl) {
+    return buildBlobArtifactUrl(configuredBlobArtifactsUrl, [
+      'advanced_metrics',
+      `${ticker}.json`,
+    ])
+  }
+
+  return buildApiTickerPayloadUrl(advancedMetricsBaseUrl, ticker)
+}
+
+function buildApiTickerPayloadUrl(baseUrl: string | null, ticker: string) {
+  if (!baseUrl) {
+    throw new Error('Ticker payload URL is not configured.')
+  }
+
   return `${baseUrl}/${encodeURIComponent(ticker)}`
+}
+
+function buildBlobArtifactUrl(baseUrl: URL, pathSegments: string[]) {
+  const nextUrl = new URL(baseUrl.toString())
+  const normalizedBasePath = nextUrl.pathname.replace(/\/+$/, '')
+  const encodedPath = pathSegments
+    .flatMap((segment) => segment.split('/'))
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+
+  nextUrl.pathname = `${normalizedBasePath}/${encodedPath}`
+
+  return nextUrl.toString()
 }
 
 function normalizeApiBaseUrl(baseUrl: string | undefined) {
@@ -278,6 +344,34 @@ function buildApiRootUrl(baseUrl: string | null) {
   return baseUrl.endsWith('/api') ? baseUrl : `${baseUrl}/api`
 }
 
+function normalizeBlobArtifactsUrl(baseUrl: string | undefined) {
+  const normalizedValue = baseUrl?.trim()
+
+  if (!normalizedValue) {
+    return null
+  }
+
+  try {
+    return new URL(normalizedValue)
+  } catch {
+    throw new Error(
+      'VITE_AZURE_BLOB_ARTIFACTS_URL must be a valid absolute URL to the artifacts container.',
+    )
+  }
+}
+
+function buildPayloadRequestError(
+  label: string,
+  status: number,
+  preparationScript: string,
+) {
+  if (configuredBlobArtifactsUrl) {
+    return `${label} request failed with ${status}. Confirm VITE_AZURE_BLOB_ARTIFACTS_URL points to the Azure artifacts container and that browser read access plus Blob CORS are configured for this origin.`
+  }
+
+  return `${label} request failed with ${status}. Run ${preparationScript} first.`
+}
+
 async function parsePayloadResponse<T>(response: Response, label: string) {
   const text = await response.text()
 
@@ -294,10 +388,15 @@ async function parsePayloadResponse<T>(response: Response, label: string) {
       }
     }
 
-    const message =
-      parseError instanceof Error ? parseError.message : 'Unknown parse error'
+    if (parseError instanceof Error) {
+      throw new Error(`${label} payload is not valid JSON. ${parseError.message}`, {
+        cause: parseError,
+      })
+    }
 
-    throw new Error(`${label} payload is not valid JSON. ${message}`)
+    throw new Error(`${label} payload is not valid JSON. Unknown parse error`, {
+      cause: parseError,
+    })
   }
 }
 
