@@ -3,14 +3,14 @@
 # [1] IMPORT LIBRARY
 #
 ############################
-import json
-
 import pandas as pd
 from tqdm.auto import tqdm
 
+from backend.utils.storage import (
+    get_storage_mode_label,
+    write_advanced_metric_payload,
+)
 from backend.utils.utils import (
-    ARTIFACTS_PATH,
-    FRONTEND_PUBLIC_PATH,
     SP500_TICKERS,
     convert_series_to_point_records,
     get_all_close_prices,
@@ -26,8 +26,6 @@ from backend.utils.utils import (
 #
 ############################
 SHORT_TERM_VOLATILITY = "daily_short_term_volatility"
-ADVANCED_METRICS_PATH = ARTIFACTS_PATH / "advanced_metrics"
-FRONTEND_ADVANCED_METRICS_PATH = FRONTEND_PUBLIC_PATH / "advanced_metrics"
 
 
 ############################
@@ -62,24 +60,26 @@ def calculate_garch_1_1_volatility(returns: pd.DataFrame) -> pd.DataFrame:
     pass
 
 
-def write_json_output(output: dict, output_path) -> None:
-    temp_output_path = output_path.with_suffix(f"{output_path.suffix}.tmp")
-
-    with temp_output_path.open("w", encoding="utf-8") as file:
-        json.dump(output, file, indent=2, allow_nan=False)
-
-    temp_output_path.replace(output_path)
-
-
 def build_advanced_metric_payload(ticker: str, short_term_volatility: pd.DataFrame) -> dict:
     volatility_series = short_term_volatility[ticker]
     point_records = convert_series_to_point_records(volatility_series)
+    has_index = len(volatility_series.index) > 0
+
+    if point_records:
+        start_date = point_records[0]["date"]
+        end_date = point_records[-1]["date"]
+    elif has_index:
+        start_date = volatility_series.index.min().strftime("%Y-%m-%d")
+        end_date = volatility_series.index.max().strftime("%Y-%m-%d")
+    else:
+        start_date = ""
+        end_date = ""
 
     return {
         "ticker": ticker,
         "metrics": [SHORT_TERM_VOLATILITY],
-        "start_date": point_records[0]["date"],
-        "end_date": point_records[-1]["date"],
+        "start_date": start_date,
+        "end_date": end_date,
         "series": {
             SHORT_TERM_VOLATILITY: point_records,
         },
@@ -90,11 +90,6 @@ def write_advanced_metric_payloads(
     short_term_volatility: pd.DataFrame,
     available_tickers: list[str],
 ) -> None:
-    ARTIFACTS_PATH.mkdir(parents=True, exist_ok=True)
-    FRONTEND_PUBLIC_PATH.mkdir(parents=True, exist_ok=True)
-    ADVANCED_METRICS_PATH.mkdir(parents=True, exist_ok=True)
-    FRONTEND_ADVANCED_METRICS_PATH.mkdir(parents=True, exist_ok=True)
-
     for ticker in tqdm(
         available_tickers,
         desc="Writing advanced metric files",
@@ -103,8 +98,7 @@ def write_advanced_metric_payloads(
         payload = build_advanced_metric_payload(ticker, short_term_volatility)
         ticker_filename = ticker_to_filename(ticker)
 
-        write_json_output(payload, ADVANCED_METRICS_PATH / ticker_filename)
-        write_json_output(payload, FRONTEND_ADVANCED_METRICS_PATH / ticker_filename)
+        write_advanced_metric_payload(ticker_filename, payload)
 
 
 ############################
@@ -137,8 +131,7 @@ def main() -> None:
         write_advanced_metric_payloads(short_term_volatility, available_tickers)
         progress.update()
 
-    print(f"Saved advanced metric payloads to: {ADVANCED_METRICS_PATH}")
-    print(f"Saved frontend advanced metric payloads to: {FRONTEND_ADVANCED_METRICS_PATH}")
+    print(f"Saved advanced metric payloads to storage mode: {get_storage_mode_label()}")
     print(f"Number of tickers: {len(available_tickers)}")
 
 

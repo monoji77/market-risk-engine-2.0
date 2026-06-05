@@ -8,19 +8,21 @@ on:
   # Allows you to manually run it from GitHub Actions tab
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   refresh-finance-data:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+      AZURE_STORAGE_SAS_TOKEN: ${{ secrets.AZURE_STORAGE_SAS_TOKEN }}
+      AZURE_STORAGE_ACCOUNT_NAME: ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}
+      AZURE_STORAGE_CONTAINER_RAW: ${{ secrets.AZURE_STORAGE_CONTAINER_RAW }}
+      AZURE_STORAGE_CONTAINER_ARTIFACTS: ${{ secrets.AZURE_STORAGE_CONTAINER_ARTIFACTS }}
+      AZURE_STORAGE_CONTAINER_CACHE: ${{ secrets.AZURE_STORAGE_CONTAINER_CACHE }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.ref_name }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,25 +32,32 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install -r requirements.txt
 
-      - name: Refresh market data and frontend artifacts
+      - name: Validate Azure storage configuration
+        run: |
+          if [ -z "${AZURE_STORAGE_CONTAINER_RAW}" ]; then
+            echo "::error::Missing AZURE_STORAGE_CONTAINER_RAW secret."
+            exit 1
+          fi
+
+          if [ -z "${AZURE_STORAGE_CONTAINER_ARTIFACTS}" ]; then
+            echo "::error::Missing AZURE_STORAGE_CONTAINER_ARTIFACTS secret."
+            exit 1
+          fi
+
+          if [ -z "${AZURE_STORAGE_CONNECTION_STRING}" ] && [ -z "${AZURE_STORAGE_SAS_TOKEN}" ]; then
+            echo "::error::Set either AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_SAS_TOKEN."
+            exit 1
+          fi
+
+          if [ -n "${AZURE_STORAGE_SAS_TOKEN}" ] && [ -z "${AZURE_STORAGE_ACCOUNT_NAME}" ]; then
+            echo "::error::AZURE_STORAGE_ACCOUNT_NAME is required when using AZURE_STORAGE_SAS_TOKEN."
+            exit 1
+          fi
+
+      - name: Refresh market data in Azure Blob Storage
         run: |
           python -m backend.01_read_data
           python -m backend.02_build_market_visualizations
           python -m backend.03_calculate_other_risk_measures
-
-
-      - name: Commit and push updated data
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add backend/data backend/artifacts frontend/public_app
-
-          if git diff --cached --quiet; then
-            echo "No data changes to commit."
-          else
-            git commit -m "Update daily finance data"
-            git push origin HEAD:${{ github.ref_name }}
-          fi

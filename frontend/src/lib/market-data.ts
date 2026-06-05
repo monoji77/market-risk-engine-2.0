@@ -10,9 +10,11 @@ import {
   type Metric,
 } from '../types/market'
 
-const marketCatalogUrl = `${import.meta.env.BASE_URL}market_catalog.json`
-const marketTickerBaseUrl = `${import.meta.env.BASE_URL}tickers`
-const advancedMetricsBaseUrl = `${import.meta.env.BASE_URL}advanced_metrics`
+const configuredApiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
+const apiRootUrl = buildApiRootUrl(configuredApiBaseUrl)
+const marketCatalogUrl = `${apiRootUrl}/market/catalog`
+const marketTickerBaseUrl = `${apiRootUrl}/market/tickers`
+const advancedMetricsBaseUrl = `${apiRootUrl}/market/advanced-metrics`
 
 let catalogPromise: Promise<MarketCatalogPayload> | null = null
 const tickerDatasetPromiseCache = new Map<string, Promise<MarketDataset>>()
@@ -253,7 +255,27 @@ function normalizePointRows(rows: MarketPointRow[]) {
 }
 
 function buildTickerPayloadUrl(baseUrl: string, ticker: string) {
-  return `${baseUrl}/${encodeURIComponent(ticker)}.json`
+  return `${baseUrl}/${encodeURIComponent(ticker)}`
+}
+
+function normalizeApiBaseUrl(baseUrl: string | undefined) {
+  const normalizedValue = baseUrl?.trim()
+
+  if (!normalizedValue) {
+    return null
+  }
+
+  return normalizedValue.endsWith('/')
+    ? normalizedValue.slice(0, -1)
+    : normalizedValue
+}
+
+function buildApiRootUrl(baseUrl: string | null) {
+  if (!baseUrl) {
+    return '/api'
+  }
+
+  return baseUrl.endsWith('/api') ? baseUrl : `${baseUrl}/api`
 }
 
 async function parsePayloadResponse<T>(response: Response, label: string) {

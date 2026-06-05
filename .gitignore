@@ -34,3 +34,10 @@ __pycache__/
 # http files
 http-preview.log 
 http-preview.err
+
+# raw data and artifacts
+.env
+backend/data/
+backend/artifacts/
+frontend/public_app/*.json
+frontend/public/*.json

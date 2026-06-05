@@ -1,5 +1,8 @@
 fastapi==0.136.3
 uvicorn==0.48.0
+python-dotenv==1.1.1
+azure-identity==1.25.1
+azure-storage-blob==12.27.1
 numpy==2.4.6
 pandas==3.0.3
 requests==2.34.2

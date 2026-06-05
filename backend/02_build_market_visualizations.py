@@ -3,17 +3,17 @@
 # [1] IMPORT LIBRARY
 #
 ############################
-
-import json
-
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 
+from backend.utils.storage import (
+    get_storage_mode_label,
+    write_market_catalog_payload,
+    write_market_ticker_payload,
+)
 from backend.utils.utils import (
-    ARTIFACTS_PATH,
     CLOSE,
-    FRONTEND_PUBLIC_PATH,
     LOG_RETURNS,
     RETURNS,
     SP500_DF,
@@ -34,27 +34,12 @@ from backend.utils.utils import (
 
 DEFAULT_TICKER = "AAPL"
 DRAWDOWN = "drawdown"
-MARKET_CATALOG_PATH = ARTIFACTS_PATH / "market_catalog.json"
-FRONTEND_MARKET_CATALOG_PATH = FRONTEND_PUBLIC_PATH / "market_catalog.json"
-MARKET_TICKERS_PATH = ARTIFACTS_PATH / "tickers"
-FRONTEND_MARKET_TICKERS_PATH = FRONTEND_PUBLIC_PATH / "tickers"
-
 
 ############################
 #
 # [3] HELPER FUNCTIONS
 #
 ############################
-
-
-def write_json_output(output: dict, output_path) -> None:
-    temp_output_path = output_path.with_suffix(f"{output_path.suffix}.tmp")
-
-    with temp_output_path.open("w", encoding="utf-8") as file:
-        json.dump(output, file, indent=2, allow_nan=False)
-
-    temp_output_path.replace(output_path)
-
 
 def get_market_catalog_entries(available_tickers: list[str]) -> list[dict]:
     metadata_map: dict[str, dict] = {}
@@ -137,11 +122,6 @@ def write_market_ticker_payloads(
     close_prices: pd.DataFrame,
     available_tickers: list[str],
 ) -> None:
-    ARTIFACTS_PATH.mkdir(parents=True, exist_ok=True)
-    FRONTEND_PUBLIC_PATH.mkdir(parents=True, exist_ok=True)
-    MARKET_TICKERS_PATH.mkdir(parents=True, exist_ok=True)
-    FRONTEND_MARKET_TICKERS_PATH.mkdir(parents=True, exist_ok=True)
-
     for ticker in tqdm(
         available_tickers,
         desc="Writing market ticker files",
@@ -150,8 +130,7 @@ def write_market_ticker_payloads(
         payload = build_ticker_market_payload(ticker, close_prices)
         ticker_filename = ticker_to_filename(ticker)
 
-        write_json_output(payload, MARKET_TICKERS_PATH / ticker_filename)
-        write_json_output(payload, FRONTEND_MARKET_TICKERS_PATH / ticker_filename)
+        write_market_ticker_payload(ticker_filename, payload)
 
 
 ############################
@@ -176,18 +155,14 @@ def main() -> None:
 
         progress.set_postfix_str("writing market catalog")
         market_catalog = build_market_catalog(available_tickers)
-        write_json_output(market_catalog, MARKET_CATALOG_PATH)
-        write_json_output(market_catalog, FRONTEND_MARKET_CATALOG_PATH)
+        write_market_catalog_payload(market_catalog)
         progress.update()
 
         progress.set_postfix_str("writing per-ticker market payloads")
         write_market_ticker_payloads(close_prices, available_tickers)
         progress.update()
 
-    print(f"Saved market catalog to: {MARKET_CATALOG_PATH}")
-    print(f"Saved frontend market catalog to: {FRONTEND_MARKET_CATALOG_PATH}")
-    print(f"Saved ticker payloads to: {MARKET_TICKERS_PATH}")
-    print(f"Saved frontend ticker payloads to: {FRONTEND_MARKET_TICKERS_PATH}")
+    print(f"Saved market catalog and ticker payloads to storage mode: {get_storage_mode_label()}")
     print(f"Number of tickers: {len(available_tickers)}")
 
 

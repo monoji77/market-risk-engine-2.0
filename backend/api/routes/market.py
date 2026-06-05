@@ -1,86 +1,76 @@
-import json
-from pathlib import Path
-from typing import Literal
+from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Query
+from azure.core.exceptions import ResourceNotFoundError
+from fastapi import APIRouter, HTTPException
+
+try:
+    from utils.storage import (
+        get_storage_mode_label,
+        read_advanced_metric_payload_if_exists,
+        read_market_catalog_payload,
+        read_market_ticker_payload,
+    )
+except ModuleNotFoundError:
+    from backend.utils.storage import (
+        get_storage_mode_label,
+        read_advanced_metric_payload_if_exists,
+        read_market_catalog_payload,
+        read_market_ticker_payload,
+    )
 
 
 router = APIRouter(prefix="/api/market", tags=["Market"])
 
-BACKEND_DIR = Path(__file__).resolve().parents[2]
-MARKET_VISUALIZATION_CANDIDATES = [
-    BACKEND_DIR / "artifacts" / "market_visualizations.json.tmp",
-    BACKEND_DIR / "artifacts" / "market_visualizations.json",
-]
-OTHER_RISK_MEASURES_PATH = BACKEND_DIR / "artifacts" / "other_risk_measures.json"
+
+def ticker_to_filename(ticker: str) -> str:
+    return f"{quote(ticker, safe='')}.json"
 
 
-def resolve_market_visualizations_path():
-    for path in MARKET_VISUALIZATION_CANDIDATES:
-        if path.exists():
-            return path
-
-    return None
-
-
-@router.get("/visualizations")
-def get_market_visualizations():
-    market_visualizations_path = resolve_market_visualizations_path()
-
-    if market_visualizations_path is None:
+@router.get("/catalog")
+def get_market_catalog():
+    try:
+        return read_market_catalog_payload()
+    except (FileNotFoundError, ResourceNotFoundError) as error:
         raise HTTPException(
             status_code=404,
-            detail="market_visualizations.json not found. Run the backend artifact script first.",
-        )
-
-    with market_visualizations_path.open("r", encoding="utf-8") as file:
-        return json.load(file)
+            detail="market_catalog.json not found. Run the backend artifact script first.",
+        ) from error
 
 
-@router.get("/series")
-def get_market_series(
-    ticker: str = Query("AAPL"),
-    metric: Literal["close", "returns", "log_returns"] = Query("close"),
-):
-    market_visualizations_path = resolve_market_visualizations_path()
+@router.get("/tickers/{ticker}")
+def get_market_ticker_dataset(ticker: str):
+    ticker_filename = ticker_to_filename(ticker)
 
-    if market_visualizations_path is None:
+    try:
+        return read_market_ticker_payload(ticker_filename)
+    except (FileNotFoundError, ResourceNotFoundError) as error:
         raise HTTPException(
             status_code=404,
-            detail="market_visualizations.json not found.",
-        )
-
-    with market_visualizations_path.open("r", encoding="utf-8") as file:
-        payload = json.load(file)
-
-    if ticker not in payload["tickers"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid ticker: {ticker}. Valid tickers: {payload['tickers']}",
-        )
-
-    filtered_data = [
-        row
-        for row in payload["data"]
-        if row["ticker"] == ticker and row["metric"] == metric
-    ]
-
-    return {
-        "ticker": ticker,
-        "metric": metric,
-        "start_date": payload["start_date"],
-        "end_date": payload["end_date"],
-        "data": filtered_data,
-    }
+            detail=f"Ticker payload not found for {ticker}.",
+        ) from error
 
 
-@router.get("/advanced-metrics")
-def get_advanced_market_metrics():
-    if not OTHER_RISK_MEASURES_PATH.exists():
+@router.get("/advanced-metrics/{ticker}")
+def get_advanced_market_ticker_dataset(ticker: str):
+    ticker_filename = ticker_to_filename(ticker)
+
+    try:
+        payload = read_advanced_metric_payload_if_exists(ticker_filename)
+    except ResourceNotFoundError as error:
         raise HTTPException(
             status_code=404,
-            detail="other_risk_measures.json not found. Run the backend risk measures script first.",
+            detail=f"Advanced metrics payload not found for {ticker}.",
+        ) from error
+
+    if payload is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Advanced metrics payload not found for {ticker}.",
         )
 
-    with OTHER_RISK_MEASURES_PATH.open("r", encoding="utf-8") as file:
-        return json.load(file)
+    return payload
+
+
+@router.get("/storage-mode")
+def get_market_storage_mode():
+    return {"mode": get_storage_mode_label()}

@@ -4,31 +4,31 @@
 #
 #####################
 from io import StringIO
-from pathlib import Path
 from urllib.parse import quote
 
 import pandas as pd
 import requests
+
+try:
+    from backend.utils.storage import (
+        list_available_tickers_from_storage,
+        read_raw_price_csv,
+        read_sp500_constituents_cache,
+        write_sp500_constituents_cache,
+    )
+except ModuleNotFoundError:
+    from utils.storage import (
+        list_available_tickers_from_storage,
+        read_raw_price_csv,
+        read_sp500_constituents_cache,
+        write_sp500_constituents_cache,
+    )
 
 #####################
 #
 # [1] GLOBAL VARIABLES
 #
 #####################
-PARENT_DIR = Path(__file__).parent.parent
-REPO_ROOT = PARENT_DIR.parent
-DATA_PATH = PARENT_DIR / 'data'
-ARTIFACTS_PATH = PARENT_DIR / "artifacts"
-FRONTEND_PUBLIC_PATH = REPO_ROOT / "frontend" / "public_app"
-SP500_CONSTITUENTS_CACHE_PATH = ARTIFACTS_PATH / "sp500_constituents_cache.csv"
-TICKERS = [
-    "AAPL",
-    "MSFT",
-    "GOOGL",
-    "AMZN",
-    "TSLA",
-    "^GSPC",
-]
 TICKER = "ticker"
 VALUE = "value"
 METRIC = "metric"
@@ -56,10 +56,10 @@ def normalize_sp500_constituents(sp500_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_cached_sp500_constituents() -> pd.DataFrame | None:
-    if not SP500_CONSTITUENTS_CACHE_PATH.exists():
-        return None
+    cached_df = read_sp500_constituents_cache()
 
-    cached_df = pd.read_csv(SP500_CONSTITUENTS_CACHE_PATH)
+    if cached_df is None:
+        return None
 
     return normalize_sp500_constituents(cached_df)
 
@@ -83,8 +83,7 @@ def get_sp500_constituents():
             attrs={"id": "constituents"}
         )[0])
 
-        SP500_CONSTITUENTS_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        sp500_df.to_csv(SP500_CONSTITUENTS_CACHE_PATH, index=False)
+        write_sp500_constituents_cache(sp500_df)
 
         return sp500_df
     except (requests.RequestException, ValueError):
@@ -93,11 +92,7 @@ def get_sp500_constituents():
         if cached_df is not None:
             return cached_df
 
-        local_tickers = sorted(
-            path.stem
-            for path in DATA_PATH.glob("*.csv")
-            if path.stem
-        )
+        local_tickers = list_available_tickers_from_storage()
 
         if not local_tickers:
             raise
@@ -114,13 +109,7 @@ def get_all_close_prices(tickers: list[str] | None = None) -> pd.DataFrame:
     """
 
     def load_close_prices(ticker: str) -> pd.Series:
-        file_path = DATA_PATH / f"{ticker}.csv"
-
-        ticker_data = pd.read_csv(
-            file_path,
-            index_col=0,
-            parse_dates=True
-        )
+        ticker_data = read_raw_price_csv(ticker)
 
         close = ticker_data[CLOSE_PRICE_COLUMN].copy()
         close.name = ticker
@@ -192,11 +181,7 @@ def convert_series_to_point_records(series: pd.Series) -> list[dict[str, str | f
 
 
 def get_available_tickers() -> list[str]:
-    return sorted(
-        path.stem
-        for path in DATA_PATH.glob("*.csv")
-        if path.stem
-    )
+    return list_available_tickers_from_storage()
 
 
 def ticker_to_filename(ticker: str) -> str:
@@ -208,7 +193,8 @@ def ticker_to_filename(ticker: str) -> str:
 # [1] SHARED VARIABLES
 #
 #####################
-SP500_DF = get_sp500_constituents()
+_cached_sp500_df = load_cached_sp500_constituents()
+SP500_DF = _cached_sp500_df if _cached_sp500_df is not None else get_sp500_constituents()
 SP500_TICKERS = SP500_DF["yf_symbol"].tolist()
 if "^GSPC" not in SP500_TICKERS:
     SP500_TICKERS.append("^GSPC")

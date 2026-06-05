@@ -35,17 +35,12 @@ Live site: [market-risk-engine-2-0.vercel.app](https://market-risk-engine-2-0.ve
 │   └── thumbnail.png                # Repository thumbnail
 ├── backend/
 │   ├── api/                         # FastAPI application and routes
-│   ├── artifacts/                   # Generated frontend-ready JSON artifacts
-│   ├── data/                        # Downloaded per-ticker CSV data
 │   ├── utils/                       # Shared backend helpers
 │   ├── 01_read_data.py              # Yahoo Finance data download script
 │   ├── 02_build_market_visualizations.py  # Market + drawdown artifact builder
 │   └── 03_calculate_other_risk_measures.py # Advanced metrics artifact builder
 ├── frontend/
-│   ├── public_app/
-│   │   ├── market_catalog.json            # Frontend catalog with ticker, security, and sector metadata
-│   │   ├── tickers/                       # Per-ticker market artifacts served by the frontend
-│   │   └── advanced_metrics/              # Per-ticker advanced-metrics artifacts served by the frontend
+│   ├── public/                      # Frontend static assets like favicon/icons
 │   ├── src/
 │   │   ├── assets/                   # Frontend images
 │   │   ├── components/               # Charts and reusable UI
@@ -70,9 +65,9 @@ Live site: [market-risk-engine-2-0.vercel.app](https://market-risk-engine-2-0.ve
 - 95% confidence range interpretation for daily volatility under normal market conditions
 - Asset and series switching with frontend-side buffering and transition effects
 - Market catalog entries include ticker-level `security` metadata so the frontend can show descriptive asset names directly from generated JSON
-- FastAPI backend for serving frontend-ready JSON payloads from both market and advanced-metrics artifacts
-- Static artifact path through `frontend/public_app/market_catalog.json`, `frontend/public_app/tickers/`, and `frontend/public_app/advanced_metrics/` for lightweight deployment
-- Scheduled GitHub Actions workflow to refresh market data and commit updated artifacts
+- FastAPI backend for serving frontend-ready JSON payloads directly from Azure Blob Storage
+- Azure Blob-backed raw-price CSVs, catalog JSON, per-ticker market payloads, and advanced metrics payloads
+- Scheduled GitHub Actions workflow to refresh market data and write updated outputs to Azure Blob Storage
 
 ## EWMA Volatility
 
@@ -143,11 +138,12 @@ npm install
 npm run dev
 ```
 
-By default, the frontend reads the checked-in static artifacts from:
+Azure Blob Storage is the only supported runtime data store. Before running the scripts, set:
 
-- `frontend/public_app/market_catalog.json`
-- `frontend/public_app/tickers/`
-- `frontend/public_app/advanced_metrics/`
+- `AZURE_STORAGE_CONNECTION_STRING` or `AZURE_STORAGE_SAS_TOKEN` with `AZURE_STORAGE_ACCOUNT_NAME`
+- `AZURE_STORAGE_CONTAINER_RAW`
+- `AZURE_STORAGE_CONTAINER_ARTIFACTS`
+- `AZURE_STORAGE_CONTAINER_CACHE` optional
 
 ### Run With Backend API
 
@@ -155,7 +151,7 @@ By default, the frontend reads the checked-in static artifacts from:
 uvicorn api.main:app --reload --app-dir backend
 ```
 
-If you want the frontend to call the FastAPI backend directly, set `VITE_API_BASE_URL` before starting the frontend dev server.
+The frontend now reads market data exclusively through the FastAPI backend. For local development, you can rely on Vite's `/api` proxy or set `VITE_API_BASE_URL` to your backend origin, for example `http://127.0.0.1:8000`. If your backend is hosted separately, add its frontend origin to `CORS_ALLOWED_ORIGINS`.
 
 ## Available Commands
 
@@ -165,9 +161,9 @@ If you want the frontend to call the FastAPI backend directly, set `VITE_API_BAS
 | `cd frontend && npm run build` | Runs TypeScript build checks and creates the production build in `frontend/dist/` |
 | `cd frontend && npm run lint` | Runs ESLint across the frontend |
 | `cd frontend && npm run preview` | Serves the production frontend build locally |
-| `python -m backend.01_read_data` | Downloads and refreshes source market CSVs |
-| `python -m backend.02_build_market_visualizations` | Builds market catalog plus per-ticker market and drawdown JSON artifacts |
-| `python -m backend.03_calculate_other_risk_measures` | Builds per-ticker advanced risk metrics artifacts, including daily short term volatility inputs used by the Advanced frontend view |
+| `python -m backend.01_read_data` | Downloads and refreshes source market CSVs into Azure Blob Storage |
+| `python -m backend.02_build_market_visualizations` | Builds market catalog plus per-ticker market and drawdown JSON artifacts in Azure Blob Storage |
+| `python -m backend.03_calculate_other_risk_measures` | Builds per-ticker advanced risk metrics artifacts in Azure Blob Storage |
 | `uvicorn api.main:app --reload --app-dir backend` | Runs the FastAPI backend locally |
 
 ## Deployment
@@ -184,7 +180,7 @@ This repository currently supports:
 - Vercel for the live frontend deployment
 - GitHub Actions for scheduled market data refreshes
 
-The daily workflow in `.github/workflows/daily-finance-data.yml` refreshes source data, rebuilds artifacts, and commits updated `backend/data`, `backend/artifacts`, and `frontend/public_app` outputs automatically.
+The daily workflow in `.github/workflows/daily-finance-data.yml` refreshes source data and writes updated outputs directly to Azure Blob Storage.
 
 It now runs the data scripts as Python modules:
 
@@ -194,7 +190,7 @@ python -m backend.02_build_market_visualizations
 python -m backend.03_calculate_other_risk_measures
 ```
 
-That matters because the backend scripts import `backend.utils.utils`; invoking them as modules keeps the import path stable on GitHub runners and local machines. As long as the runner can reach Yahoo Finance and the S&P 500 constituents source, GitHub Actions will repopulate fresh CSVs and rebuild the frontend-ready JSON artifacts, including the catalog fields used for ticker descriptions such as `security`.
+That matters because the backend scripts import `backend.utils.utils`; invoking them as modules keeps the import path stable on GitHub runners and local machines. As long as the runner can reach Yahoo Finance, the S&P 500 constituents source, and the configured Azure Storage account, GitHub Actions will repopulate the Blob-backed CSV and JSON payloads, including the catalog fields used for ticker descriptions such as `security`.
 
 ## Future Work
 

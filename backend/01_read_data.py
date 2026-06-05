@@ -7,9 +7,9 @@ import pandas as pd
 import yfinance as yf
 from tqdm.auto import tqdm
 
-from backend.utils.utils import DATA_PATH, SP500_TICKERS
-
-
+from backend.utils.storage import get_storage_mode_label, write_raw_price_csv
+from backend.utils.utils import SP500_TICKERS
+RAW_PRICE = "raw_price"
 ############################
 #
 # [2] MAIN FUNCTION
@@ -40,10 +40,10 @@ def main() -> None:
         for ticker in tqdm(SP500_TICKERS, desc="Saving ticker CSVs", unit="ticker"):
             ticker_data = rich_data.xs(ticker, axis=1, level=1)
             ticker_data = ticker_data.dropna()
-            ticker_data.to_csv(f"{DATA_PATH}/{ticker}.csv", index=True)
+            write_raw_price_csv(ticker, ticker_data)
 
         progress.update()
-    print(f"ALL TICKERS SAVED IN FILEPATH: {DATA_PATH}")
+    print(f"All tickers saved to storage mode: {get_storage_mode_label()} ({RAW_PRICE})")
 ############################
 #
 # [3] RUN MAIN FUNCTION
