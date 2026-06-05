@@ -16,7 +16,11 @@ import { CountUpValue } from './components/ui/CountUpValue'
 import { InfoTooltip } from './components/ui/InfoTooltip'
 import ShinyText from './components/ui/ShinyText'
 import { ShiftingTabs } from './components/ui/ShiftingTabs'
-import { loadMarketCatalog, loadTickerDataset } from './lib/market-data'
+import {
+  loadMarketCatalog,
+  loadTickerDataset,
+  refreshTickerDataset,
+} from './lib/market-data'
 import type {
   ChartVisibleRange,
   MarketCatalogTicker,
@@ -131,7 +135,7 @@ const advancedChartExpansionIds = {
 const defaultAdvancedChartVisibility = {
   returns: true,
   drawdown: true,
-  volatility: true,
+  volatility: false,
   garch: true,
   ewma: true,
 } satisfies Record<AdvancedChartKey, boolean>
@@ -168,6 +172,7 @@ function App() {
   const [advancedChartVisibility, setAdvancedChartVisibility] = useState(
     defaultAdvancedChartVisibility,
   )
+  const [isJsonRefreshing, setIsJsonRefreshing] = useState(false)
   const refreshTimerRef = useRef<number | null>(null)
   const tickerLoadRequestIdRef = useRef(0)
   const advancedRefreshTimerRef = useRef<number | null>(null)
@@ -568,27 +573,29 @@ function App() {
 
   const refreshLabel = `${selectedTicker} ${metricMeta[chartView === 'advanced' ? 'returns' : selectedMetric].chartLabel}`
   const isTickerRefreshing = selectedTicker !== activeTicker
+  const isTickerPayloadRefreshing = isTickerRefreshing || isJsonRefreshing
   const isMetricRefreshing = selectedMetric !== activeMetric
-  const isRefreshing = isTickerRefreshing || isMetricRefreshing
+  const isRefreshing = isTickerPayloadRefreshing || isMetricRefreshing
   const isAdvancedReturnsBuffering =
     chartView === 'advanced' && activeMetric !== 'returns'
   const isAdvancedReturnsChartRefreshing =
-    chartView === 'advanced' && (isTickerRefreshing || isAdvancedReturnsBuffering)
+    chartView === 'advanced' &&
+    (isTickerPayloadRefreshing || isAdvancedReturnsBuffering)
   const isAdvancedVolatilityChartRefreshing =
     chartView === 'advanced' &&
-    (isTickerRefreshing ||
+    (isTickerPayloadRefreshing ||
       isAdvancedReturnsBuffering ||
       isAdvancedVolatilityBuffering)
   const isAdvancedGarchChartRefreshing = isAdvancedVolatilityChartRefreshing
   const isAdvancedEwmaChartRefreshing =
     chartView === 'advanced' &&
-    (isTickerRefreshing || isAdvancedReturnsBuffering)
+    (isTickerPayloadRefreshing || isAdvancedReturnsBuffering)
   const isSplashVisible = isLoading || !hasMetMinimumSplashDuration
   const startCountUp =
     !isSplashVisible &&
     !isLoading &&
     (chartView === 'advanced'
-      ? !isTickerRefreshing && !isAdvancedReturnsBuffering
+      ? !isTickerPayloadRefreshing && !isAdvancedReturnsBuffering
       : !isRefreshing)
   const startAdvancedCountUp = startCountUp && !isAdvancedVolatilityBuffering
   const hasVisibleAdvancedCharts =
@@ -863,6 +870,56 @@ function App() {
     }))
   }
 
+  async function handleJsonRefresh() {
+    if (!dataset || isLoading || isTickerRefreshing || isJsonRefreshing) {
+      return
+    }
+
+    const tickerToRefresh = activeTicker
+    const requestId = tickerLoadRequestIdRef.current + 1
+    tickerLoadRequestIdRef.current = requestId
+
+    setIsJsonRefreshing(true)
+    setError(null)
+
+    try {
+      const reloadedDataset = await refreshTickerDataset(tickerToRefresh)
+
+      if (requestId !== tickerLoadRequestIdRef.current) {
+        return
+      }
+
+      setDataset(reloadedDataset)
+
+      if (tickerToRefresh === marketBenchmarkTicker) {
+        setBenchmarkDataset(reloadedDataset)
+      } else {
+        refreshTickerDataset(marketBenchmarkTicker)
+          .then((reloadedBenchmarkDataset) => {
+            if (requestId === tickerLoadRequestIdRef.current) {
+              setBenchmarkDataset(reloadedBenchmarkDataset)
+            }
+          })
+          .catch(() => {
+            // Preserve the current benchmark dataset if the background refresh fails.
+          })
+      }
+    } catch (loadError) {
+      if (requestId !== tickerLoadRequestIdRef.current) {
+        return
+      }
+
+      const message =
+        loadError instanceof Error
+          ? loadError.message
+          : `Unable to refresh ticker payload for ${tickerToRefresh}.`
+
+      setError(message)
+    } finally {
+      setIsJsonRefreshing(false)
+    }
+  }
+
   if (!dataset && !isLoading && error) {
     // keep the normal UI path below; this branch only avoids nullability noise
   }
@@ -1012,6 +1069,19 @@ function App() {
                         'Loading'
                       )}
                     </span>
+                    <button
+                      type="button"
+                      className="status-action-button"
+                      data-refreshing={isJsonRefreshing}
+                      disabled={
+                        !dataset || isLoading || isTickerRefreshing || isJsonRefreshing
+                      }
+                      onClick={() => {
+                        void handleJsonRefresh()
+                      }}
+                    >
+                      {isJsonRefreshing ? 'Refreshing JSON...' : 'Refresh JSON'}
+                    </button>
                   </div>
                 </div>
 
@@ -1087,6 +1157,40 @@ function App() {
                         Advanced
                       </button>
                     </nav>
+                  </div>
+
+                  <div className="view-rail__details">
+                    <div className="chart-instructions-card">
+                      <ol className="chart-instructions-card__list">
+                        <li>
+                          Hover mouse on the chart to get risk values for
+                          hovered dates
+                        </li>
+                        <li>
+                          Left-click within the chart to lock a date of interest
+                        </li>
+                        <li>
+                          Right-click within the chart* to unlock the date and
+                          enable dynamic viewing again
+                        </li>
+                        {chartView === 'advanced' ? (
+                          <li>
+                            Toggle the toggle bar to deactivate or activate the
+                            charts
+                          </li>
+                        ) : null}
+                      </ol>
+                    </div>
+
+                    <div className="chart-toolbar">
+                      <div className="chart-window-card">
+                        <span className="chart-window-card__label">Window</span>
+                        <strong className="chart-window-card__value">
+                          {formatSingleDate(visibleWindowStartDate)} -{' '}
+                          {formatSingleDate(visibleWindowEndDate)}
+                        </strong>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1410,42 +1514,6 @@ function App() {
                       </div>
 
                       <div className="chart-column">
-                        <div className="visualizer-toolbar-row">
-                          <div className="chart-instructions-card">
-                            <ol className="chart-instructions-card__list">
-                              <li>
-                                Hover mouse on the chart to get risk values for
-                                hovered dates
-                              </li>
-                              <li>
-                                Left-click within the chart to lock a date of
-                                interest
-                              </li>
-                              <li>
-                                Right-click within the chart* to unlock the date
-                                and enable dynamic viewing again
-                              </li>
-                              {chartView === 'advanced' ? (
-                                <li>
-                                  Toggle the toggle bar to deactivate or
-                                  activate the charts
-                                </li>
-                              ) : null}
-                            </ol>
-                          </div>
-                          <div className="chart-toolbar">
-                            <div className="chart-window-card">
-                              <span className="chart-window-card__label">
-                                Window
-                              </span>
-                              <strong className="chart-window-card__value">
-                                {formatSingleDate(visibleWindowStartDate)} -{' '}
-                                {formatSingleDate(visibleWindowEndDate)}
-                              </strong>
-                            </div>
-                          </div>
-                        </div>
-
                         <div className="chart-panel chart-stack">
                           <AnimatePresence mode="wait" initial={false}>
                             {chartView === 'overview' ? (
@@ -1497,7 +1565,7 @@ function App() {
                                       points={currentDrawdownPoints}
                                       defaultVisibleFrom={chartFocusStartDate}
                                       rangeResetKey={activeTicker}
-                                      isRefreshing={isTickerRefreshing}
+                                      isRefreshing={isTickerPayloadRefreshing}
                                       isHoverLocked={isHoverDateLocked}
                                       onHoverDateChange={handleSharedHoverDateChange}
                                       onHoverLockChange={handleSharedHoverLockChange}

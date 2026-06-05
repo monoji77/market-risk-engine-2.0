@@ -10,8 +10,12 @@ import {
   type Metric,
   type RiskClassification,
   type TickerRiskAssessment,
-  type VolatilityMetricKey,
-} from '../types/market'
+type VolatilityMetricKey,
+  } from '../types/market'
+
+interface LoadOptions {
+  forceRefresh?: boolean
+}
 
 const configuredBlobArtifactsUrl = normalizeBlobArtifactsUrl(
   import.meta.env.VITE_AZURE_BLOB_ARTIFACTS_URL,
@@ -42,13 +46,23 @@ export function loadMarketCatalog() {
 }
 
 export function loadTickerDataset(ticker: string) {
-  const cachedPromise = tickerDatasetPromiseCache.get(ticker)
+  return primeTickerDatasetPromise(ticker)
+}
+
+export function refreshTickerDataset(ticker: string) {
+  return primeTickerDatasetPromise(ticker, { forceRefresh: true })
+}
+
+function primeTickerDatasetPromise(ticker: string, options: LoadOptions = {}) {
+  const cachedPromise = options.forceRefresh
+    ? null
+    : tickerDatasetPromiseCache.get(ticker)
 
   if (cachedPromise) {
     return cachedPromise
   }
 
-  const nextPromise = getTickerDataset(ticker).catch((error) => {
+  const nextPromise = getTickerDataset(ticker, options).catch((error) => {
     tickerDatasetPromiseCache.delete(ticker)
     throw error
   })
@@ -83,21 +97,25 @@ async function getMarketCatalog() {
   return normalizeMarketCatalogPayload(assertMarketCatalogPayload(payload))
 }
 
-async function getTickerDataset(ticker: string) {
+async function getTickerDataset(ticker: string, options: LoadOptions = {}) {
   const [marketPayload, advancedPayload] = await Promise.all([
-    loadMarketTickerPayload(ticker),
-    loadAdvancedTickerPayload(ticker),
+    loadMarketTickerPayload(ticker, options),
+    loadAdvancedTickerPayload(ticker, options),
   ])
 
   return normalizeTickerPayload(marketPayload, advancedPayload)
 }
 
-async function loadMarketTickerPayload(ticker: string) {
-  const response = await fetch(buildMarketTickerPayloadUrl(ticker), {
-    headers: {
-      Accept: 'application/json',
+async function loadMarketTickerPayload(ticker: string, options: LoadOptions = {}) {
+  const response = await fetch(
+    buildRequestUrl(buildMarketTickerPayloadUrl(ticker), options),
+    {
+      cache: options.forceRefresh ? 'no-store' : 'default',
+      headers: {
+        Accept: 'application/json',
+      },
     },
-  })
+  )
 
   if (!response.ok) {
     throw new Error(
@@ -117,12 +135,19 @@ async function loadMarketTickerPayload(ticker: string) {
   return normalizeMarketTickerPayload(assertMarketTickerPayload(payload))
 }
 
-async function loadAdvancedTickerPayload(ticker: string) {
-  const response = await fetch(buildAdvancedTickerPayloadUrl(ticker), {
-    headers: {
-      Accept: 'application/json',
+async function loadAdvancedTickerPayload(
+  ticker: string,
+  options: LoadOptions = {},
+) {
+  const response = await fetch(
+    buildRequestUrl(buildAdvancedTickerPayloadUrl(ticker), options),
+    {
+      cache: options.forceRefresh ? 'no-store' : 'default',
+      headers: {
+        Accept: 'application/json',
+      },
     },
-  })
+  )
 
   if (response.status === 404) {
     return null
@@ -144,6 +169,17 @@ async function loadAdvancedTickerPayload(ticker: string) {
   )
 
   return assertAdvancedTickerPayload(payload)
+}
+
+function buildRequestUrl(url: string, options: LoadOptions = {}) {
+  if (!options.forceRefresh) {
+    return url
+  }
+
+  const nextUrl = new URL(url, window.location.href)
+  nextUrl.searchParams.set('_ts', Date.now().toString())
+
+  return nextUrl.toString()
 }
 
 function assertMarketCatalogPayload(payload: MarketCatalogPayload) {

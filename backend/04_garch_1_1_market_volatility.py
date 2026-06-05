@@ -9,8 +9,8 @@ from backend.utils.garch import (
     GARCH_1_1_DISTRIBUTION,
     GARCH_1_1_VOLATILITY,
     build_distribution_summary_statistics,
-    calculate_garch_1_1_volatility,
-    collect_best_fit_distribution_models,
+    calculate_garch_1_1_volatility_with_report,
+    collect_best_fit_distribution_models_with_report,
 )
 from backend.utils.risk_assessment import build_risk_assessment_map
 from backend.utils.storage import (
@@ -68,6 +68,27 @@ def write_distribution_reports(best_fit_distributions: pd.DataFrame) -> None:
         "distribution_best_fit_by_ticker.csv",
         display_df.set_index("ticker"),
     )
+
+
+def write_garch_status_reports(garch_status_report: pd.DataFrame) -> None:
+    if garch_status_report.empty:
+        write_distribution_csv("garch_fit_status_by_ticker.csv", garch_status_report)
+        write_distribution_csv("garch_fit_status_summary.csv", garch_status_report)
+        return
+
+    status_by_ticker = garch_status_report.copy().set_index("ticker")
+    summary_df = (
+        garch_status_report
+        .groupby(["status", "stage", "reason"], dropna=False)
+        .size()
+        .rename("count")
+        .to_frame()
+    )
+    summary_df["proportion"] = summary_df["count"] / summary_df["count"].sum()
+    summary_df["proportion"] = (summary_df["proportion"] * 100).map("{:.2f}%".format)
+
+    write_distribution_csv("garch_fit_status_by_ticker.csv", status_by_ticker)
+    write_distribution_csv("garch_fit_status_summary.csv", summary_df)
 
 
 def get_series_date_bounds(series: pd.Series) -> tuple[str, str]:
@@ -220,7 +241,7 @@ def main() -> None:
     ]
 
     with tqdm(
-        total=6,
+        total=7,
         desc="04_garch_1_1_market_volatility",
         unit="step",
     ) as progress:
@@ -233,13 +254,15 @@ def main() -> None:
         progress.update()
 
         progress.set_postfix_str("selecting best-fit distributions")
-        best_fit_distributions, fits_by_ticker = collect_best_fit_distribution_models(
-            returns_by_ticker={
-                ticker: returns[ticker]
-                for ticker in available_tickers
-                if ticker in returns.columns
-            },
-            tickers=available_tickers,
+        best_fit_distributions, fits_by_ticker, distribution_selection_report = (
+            collect_best_fit_distribution_models_with_report(
+                returns_by_ticker={
+                    ticker: returns[ticker]
+                    for ticker in available_tickers
+                    if ticker in returns.columns
+                },
+                tickers=available_tickers,
+            )
         )
         progress.update()
 
@@ -248,12 +271,17 @@ def main() -> None:
         progress.update()
 
         progress.set_postfix_str("calculating garch volatility")
-        garch_volatility = calculate_garch_1_1_volatility(
+        garch_volatility, garch_status_report = calculate_garch_1_1_volatility_with_report(
             returns=returns,
             best_fit_distributions=best_fit_distributions,
             tickers=available_tickers,
             fits_by_ticker=fits_by_ticker,
+            distribution_selection_report=distribution_selection_report,
         )
+        progress.update()
+
+        progress.set_postfix_str("writing garch status reports")
+        write_garch_status_reports(garch_status_report)
         progress.update()
 
         progress.set_postfix_str("merging advanced metrics payloads")
@@ -269,6 +297,10 @@ def main() -> None:
     print(f"Saved GARCH market volatility payloads to storage mode: {get_storage_mode_label()}")
     print(f"Number of tickers analyzed: {len(available_tickers)}")
     print(f"Number of tickers with GARCH payloads: {written_count}")
+    print(
+        "Saved GARCH diagnostics to distribution/garch_fit_status_by_ticker.csv "
+        "and distribution/garch_fit_status_summary.csv"
+    )
 
 
 if __name__ == "__main__":

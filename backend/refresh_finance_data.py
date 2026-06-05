@@ -5,8 +5,8 @@ from importlib import import_module
 from tqdm.auto import tqdm
 
 from backend.utils.garch import (
-    calculate_garch_1_1_volatility,
-    collect_best_fit_distribution_models,
+    calculate_garch_1_1_volatility_with_report,
+    collect_best_fit_distribution_models_with_report,
 )
 from backend.utils.storage import get_storage_mode_label
 from backend.utils.utils import get_all_returns
@@ -19,7 +19,7 @@ garch_market_volatility = import_module("backend.04_garch_1_1_market_volatility"
 
 
 def main() -> None:
-    with tqdm(total=9, desc="refresh_finance_data", unit="step") as progress:
+    with tqdm(total=10, desc="refresh_finance_data", unit="step") as progress:
         progress.set_postfix_str("downloading price history")
         rich_data = read_data.download_price_history(read_data.SP500_TICKERS)
         progress.update()
@@ -62,13 +62,15 @@ def main() -> None:
         progress.update()
 
         progress.set_postfix_str("selecting best-fit distributions")
-        best_fit_distributions, fits_by_ticker = collect_best_fit_distribution_models(
-            returns_by_ticker={
-                ticker: returns[ticker]
-                for ticker in available_tickers
-                if ticker in returns.columns
-            },
-            tickers=available_tickers,
+        best_fit_distributions, fits_by_ticker, distribution_selection_report = (
+            collect_best_fit_distribution_models_with_report(
+                returns_by_ticker={
+                    ticker: returns[ticker]
+                    for ticker in available_tickers
+                    if ticker in returns.columns
+                },
+                tickers=available_tickers,
+            )
         )
         progress.update()
 
@@ -76,13 +78,21 @@ def main() -> None:
         garch_market_volatility.write_distribution_reports(best_fit_distributions)
         progress.update()
 
-        progress.set_postfix_str("writing final advanced metric payloads")
-        garch_volatility = calculate_garch_1_1_volatility(
+        progress.set_postfix_str("calculating garch volatility")
+        garch_volatility, garch_status_report = calculate_garch_1_1_volatility_with_report(
             returns=returns,
             best_fit_distributions=best_fit_distributions,
             tickers=available_tickers,
             fits_by_ticker=fits_by_ticker,
+            distribution_selection_report=distribution_selection_report,
         )
+        progress.update()
+
+        progress.set_postfix_str("writing garch status reports")
+        garch_market_volatility.write_garch_status_reports(garch_status_report)
+        progress.update()
+
+        progress.set_postfix_str("writing final advanced metric payloads")
         advanced_metric_payloads.update(
             garch_market_volatility.build_garch_metric_payloads(
                 close_prices,
