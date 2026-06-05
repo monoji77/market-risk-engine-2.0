@@ -73,7 +73,20 @@ def collect_best_fit_distributions(
     returns_by_ticker: dict[str, pd.Series],
     tickers: Sequence[str] | None = None,
 ) -> pd.DataFrame:
-    candidate_rows: list[dict[str, str | float]] = []
+    best_fit_distributions, _ = collect_best_fit_distribution_models(
+        returns_by_ticker=returns_by_ticker,
+        tickers=tickers,
+    )
+
+    return best_fit_distributions
+
+
+def collect_best_fit_distribution_models(
+    returns_by_ticker: dict[str, pd.Series],
+    tickers: Sequence[str] | None = None,
+) -> tuple[pd.DataFrame, dict[str, ARCHModelResult]]:
+    best_fit_rows: list[dict[str, str | float]] = []
+    fits_by_ticker: dict[str, ARCHModelResult] = {}
     selected_tickers = list(tickers) if tickers is not None else list(returns_by_ticker)
 
     for ticker in selected_tickers:
@@ -82,30 +95,39 @@ def collect_best_fit_distributions(
         if ticker_returns is None:
             continue
 
+        best_fit: ARCHModelResult | None = None
+        best_row: dict[str, str | float] | None = None
+
         for distribution in CANDIDATE_DISTRIBUTIONS:
             fit = fit_garch_1_1_model(ticker_returns, distribution)
 
             if fit is None:
                 continue
 
-            candidate_rows.append(
-                {
-                    TICKER: ticker,
-                    DISTRIBUTION: distribution,
-                    AIC: float(fit.aic),
-                }
-            )
+            candidate_row = {
+                TICKER: ticker,
+                DISTRIBUTION: distribution,
+                AIC: float(fit.aic),
+            }
 
-    if not candidate_rows:
-        return pd.DataFrame(columns=[TICKER, DISTRIBUTION, AIC])
+            if best_row is None or candidate_row[AIC] < best_row[AIC]:
+                best_row = candidate_row
+                best_fit = fit
 
-    candidate_df = pd.DataFrame(candidate_rows)
-    best_fit_indexes = candidate_df.groupby(TICKER, sort=False)[AIC].idxmin()
+        if best_row is None or best_fit is None:
+            continue
+
+        best_fit_rows.append(best_row)
+        fits_by_ticker[ticker] = best_fit
+
+    if not best_fit_rows:
+        return pd.DataFrame(columns=[TICKER, DISTRIBUTION, AIC]), {}
 
     return (
-        candidate_df.loc[best_fit_indexes]
+        pd.DataFrame(best_fit_rows)
         .sort_values(TICKER)
-        .reset_index(drop=True)
+        .reset_index(drop=True),
+        fits_by_ticker,
     )
 
 
@@ -132,6 +154,7 @@ def calculate_garch_1_1_volatility(
     returns: pd.DataFrame,
     best_fit_distributions: pd.DataFrame,
     tickers: Sequence[str],
+    fits_by_ticker: dict[str, ARCHModelResult] | None = None,
 ) -> pd.DataFrame:
     if best_fit_distributions.empty:
         return pd.DataFrame(index=returns.index)
@@ -151,7 +174,10 @@ def calculate_garch_1_1_volatility(
 
         ticker_returns = returns[ticker]
         clean_returns = normalize_returns_series(ticker_returns)
-        fit = fit_garch_1_1_model(ticker_returns, distribution)
+        fit = fits_by_ticker.get(ticker) if fits_by_ticker is not None else None
+
+        if fit is None:
+            fit = fit_garch_1_1_model(ticker_returns, distribution)
 
         if fit is None:
             continue

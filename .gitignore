@@ -39,5 +39,6 @@ http-preview.err
 .env
 backend/data/
 backend/artifacts/
+backend/temp/
 frontend/public_app/*.json
 frontend/public/*.json

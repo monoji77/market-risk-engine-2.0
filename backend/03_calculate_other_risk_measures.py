@@ -70,19 +70,46 @@ def build_advanced_metric_payload(ticker: str, short_term_volatility: pd.DataFra
     }
 
 
-def write_advanced_metric_payloads(
+def build_advanced_metric_payloads(
     short_term_volatility: pd.DataFrame,
     available_tickers: list[str],
-) -> None:
-    for ticker in tqdm(
-        available_tickers,
+) -> dict[str, dict]:
+    payloads_by_ticker: dict[str, dict] = {}
+
+    for ticker in available_tickers:
+        payloads_by_ticker[ticker] = build_advanced_metric_payload(
+            ticker,
+            short_term_volatility,
+        )
+
+    return payloads_by_ticker
+
+
+def write_advanced_metric_payload_map(payloads_by_ticker: dict[str, dict]) -> int:
+    written_count = 0
+
+    for ticker, payload in tqdm(
+        payloads_by_ticker.items(),
         desc="Writing advanced metric files",
         unit="ticker",
     ):
-        payload = build_advanced_metric_payload(ticker, short_term_volatility)
         ticker_filename = ticker_to_filename(ticker)
-
         write_advanced_metric_payload(ticker_filename, payload)
+        written_count += 1
+
+    return written_count
+
+
+def write_advanced_metric_payloads(
+    short_term_volatility: pd.DataFrame,
+    available_tickers: list[str],
+) -> int:
+    payloads_by_ticker = build_advanced_metric_payloads(
+        short_term_volatility,
+        available_tickers,
+    )
+
+    return write_advanced_metric_payload_map(payloads_by_ticker)
 
 
 ############################
@@ -112,11 +139,15 @@ def main() -> None:
         progress.update()
 
         progress.set_postfix_str("writing per-ticker advanced metrics")
-        write_advanced_metric_payloads(short_term_volatility, available_tickers)
+        written_count = write_advanced_metric_payloads(
+            short_term_volatility,
+            available_tickers,
+        )
         progress.update()
 
     print(f"Saved advanced metric payloads to storage mode: {get_storage_mode_label()}")
     print(f"Number of tickers: {len(available_tickers)}")
+    print(f"Number of advanced metric payloads written: {written_count}")
 
 
 ############################

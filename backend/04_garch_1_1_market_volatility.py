@@ -10,8 +10,9 @@ from backend.utils.garch import (
     GARCH_1_1_VOLATILITY,
     build_distribution_summary_statistics,
     calculate_garch_1_1_volatility,
-    collect_best_fit_distributions,
+    collect_best_fit_distribution_models,
 )
+from backend.utils.risk_assessment import build_risk_assessment_map
 from backend.utils.storage import (
     get_storage_mode_label,
     read_advanced_metric_payload_if_exists,
@@ -45,7 +46,12 @@ def write_distribution_reports(best_fit_distributions: pd.DataFrame) -> None:
     summary_df = build_distribution_summary_statistics(best_fit_distributions)
     formatted_summary_df = build_formatted_distribution_summary(summary_df)
 
-    write_distribution_csv("distribution_raw.csv", summary_df)
+    write_distribution_csv(
+        "distribution_raw.csv",
+        best_fit_distributions.set_index("ticker")
+        if not best_fit_distributions.empty
+        else best_fit_distributions,
+    )
     write_distribution_csv("distribution_summary_statistics.csv", formatted_summary_df)
 
     if best_fit_distributions.empty:
@@ -94,6 +100,7 @@ def build_merged_advanced_metric_payload(
     garch_volatility_series: pd.Series,
     best_fit_distribution: str | None,
     existing_payload: dict | None,
+    risk_assessment: dict | None,
 ) -> dict:
     payload = dict(existing_payload or {})
     existing_metrics = list(payload.get("metrics", []))
@@ -118,6 +125,7 @@ def build_merged_advanced_metric_payload(
         {
             "ticker": ticker,
             "metrics": metrics,
+            "risk_assessment": risk_assessment,
             "start_date": merged_start_date,
             "end_date": merged_end_date,
             "series": series,
@@ -129,10 +137,38 @@ def build_merged_advanced_metric_payload(
 
 
 def write_garch_metric_payloads(
+    close_prices: pd.DataFrame,
+    returns: pd.DataFrame,
     garch_volatility: pd.DataFrame,
     best_fit_distributions: pd.DataFrame,
     available_tickers: list[str],
+    existing_payloads_by_ticker: dict[str, dict] | None = None,
 ) -> int:
+    payloads_by_ticker = build_garch_metric_payloads(
+        close_prices,
+        returns,
+        garch_volatility,
+        best_fit_distributions,
+        available_tickers,
+        existing_payloads_by_ticker=existing_payloads_by_ticker,
+    )
+    written_count = 0
+
+    for ticker, payload in payloads_by_ticker.items():
+        write_advanced_metric_payload(ticker_to_filename(ticker), payload)
+        written_count += 1
+
+    return written_count
+
+
+def build_garch_metric_payloads(
+    close_prices: pd.DataFrame,
+    returns: pd.DataFrame,
+    garch_volatility: pd.DataFrame,
+    best_fit_distributions: pd.DataFrame,
+    available_tickers: list[str],
+    existing_payloads_by_ticker: dict[str, dict] | None = None,
+) -> dict[str, dict]:
     distribution_by_ticker = (
         best_fit_distributions
         .set_index("ticker")[DISTRIBUTION]
@@ -140,7 +176,14 @@ def write_garch_metric_payloads(
         if not best_fit_distributions.empty
         else {}
     )
-    written_count = 0
+    payloads_by_ticker = dict(existing_payloads_by_ticker or {})
+    merged_payloads_by_ticker: dict[str, dict] = {}
+    risk_assessments_by_ticker = build_risk_assessment_map(
+        close_prices=close_prices,
+        returns=returns,
+        garch_volatility=garch_volatility,
+        tickers=available_tickers,
+    )
 
     for ticker in tqdm(
         available_tickers,
@@ -150,20 +193,24 @@ def write_garch_metric_payloads(
         if ticker not in garch_volatility.columns:
             continue
 
-        existing_payload = read_advanced_metric_payload_if_exists(
-            ticker_to_filename(ticker)
-        )
+        existing_payload = payloads_by_ticker.get(ticker)
+
+        if existing_payload is None:
+            existing_payload = read_advanced_metric_payload_if_exists(
+                ticker_to_filename(ticker)
+            )
+
         payload = build_merged_advanced_metric_payload(
             ticker=ticker,
             garch_volatility_series=garch_volatility[ticker],
             best_fit_distribution=distribution_by_ticker.get(ticker),
             existing_payload=existing_payload,
+            risk_assessment=risk_assessments_by_ticker.get(ticker),
         )
 
-        write_advanced_metric_payload(ticker_to_filename(ticker), payload)
-        written_count += 1
+        merged_payloads_by_ticker[ticker] = payload
 
-    return written_count
+    return merged_payloads_by_ticker
 
 
 def main() -> None:
@@ -186,7 +233,7 @@ def main() -> None:
         progress.update()
 
         progress.set_postfix_str("selecting best-fit distributions")
-        best_fit_distributions = collect_best_fit_distributions(
+        best_fit_distributions, fits_by_ticker = collect_best_fit_distribution_models(
             returns_by_ticker={
                 ticker: returns[ticker]
                 for ticker in available_tickers
@@ -205,11 +252,14 @@ def main() -> None:
             returns=returns,
             best_fit_distributions=best_fit_distributions,
             tickers=available_tickers,
+            fits_by_ticker=fits_by_ticker,
         )
         progress.update()
 
         progress.set_postfix_str("merging advanced metrics payloads")
         written_count = write_garch_metric_payloads(
+            close_prices,
+            returns,
             garch_volatility,
             best_fit_distributions,
             available_tickers,

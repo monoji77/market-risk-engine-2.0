@@ -8,6 +8,9 @@ import {
   type MarketSeriesSummary,
   type MarketTickerPayload,
   type Metric,
+  type RiskClassification,
+  type TickerRiskAssessment,
+  type VolatilityMetricKey,
 } from '../types/market'
 
 const configuredBlobArtifactsUrl = normalizeBlobArtifactsUrl(
@@ -260,6 +263,9 @@ function normalizeTickerPayload(
       [ticker]: garchVolatilityMarketSeries,
     },
     metrics,
+    riskAssessmentByTicker: {
+      [ticker]: normalizeRiskAssessment(advancedPayload?.risk_assessment),
+    },
     rowCount,
     series,
     shortTermVolatilitySeries: {
@@ -293,7 +299,7 @@ function buildMarketTickerPayloadUrl(ticker: string) {
   if (configuredBlobArtifactsUrl) {
     return buildBlobArtifactUrl(configuredBlobArtifactsUrl, [
       'tickers',
-      `${ticker}.json`,
+      buildTickerArtifactFilename(ticker),
     ])
   }
 
@@ -304,11 +310,15 @@ function buildAdvancedTickerPayloadUrl(ticker: string) {
   if (configuredBlobArtifactsUrl) {
     return buildBlobArtifactUrl(configuredBlobArtifactsUrl, [
       'advanced_metrics',
-      `${ticker}.json`,
+      buildTickerArtifactFilename(ticker),
     ])
   }
 
   return buildApiTickerPayloadUrl(advancedMetricsBaseUrl, ticker)
+}
+
+function buildTickerArtifactFilename(ticker: string) {
+  return `${encodeURIComponent(ticker)}.json`
 }
 
 function buildApiTickerPayloadUrl(baseUrl: string | null, ticker: string) {
@@ -468,3 +478,115 @@ function emptySummary(): MarketSeriesSummary {
 function isMetric(metric: string): metric is Metric {
   return metricOrder.includes(metric as Metric)
 }
+
+function normalizeRiskAssessment(
+  riskAssessment: TickerRiskAssessment | null | undefined,
+): TickerRiskAssessment | null {
+  if (!riskAssessment || typeof riskAssessment !== 'object') {
+    return null
+  }
+
+  return {
+    benchmark_ticker:
+      typeof riskAssessment.benchmark_ticker === 'string'
+        ? riskAssessment.benchmark_ticker
+        : '^GSPC',
+    drawdown: {
+      asset_max_drawdown_pct: normalizeFiniteNumber(
+        riskAssessment.drawdown?.asset_max_drawdown_pct,
+      ),
+      benchmark_max_drawdown_pct: normalizeFiniteNumber(
+        riskAssessment.drawdown?.benchmark_max_drawdown_pct,
+      ),
+      classification: normalizeRiskClassification(
+        riskAssessment.drawdown?.classification,
+      ),
+      lookback_days:
+        typeof riskAssessment.drawdown?.lookback_days === 'number'
+          ? riskAssessment.drawdown.lookback_days
+          : 30,
+      relative_drawdown_ratio: normalizeFiniteNumber(
+        riskAssessment.drawdown?.relative_drawdown_ratio,
+      ),
+      window_end_date:
+        typeof riskAssessment.drawdown?.window_end_date === 'string'
+          ? riskAssessment.drawdown.window_end_date
+          : '',
+      window_start_date:
+        typeof riskAssessment.drawdown?.window_start_date === 'string'
+          ? riskAssessment.drawdown.window_start_date
+          : '',
+    },
+    overall: {
+      classification: normalizeRiskClassification(
+        riskAssessment.overall?.classification,
+      ),
+      label:
+        typeof riskAssessment.overall?.label === 'string'
+          ? riskAssessment.overall.label
+          : null,
+    },
+    volatility: {
+      asset_latest_metrics: normalizeVolatilityMetricMap(
+        riskAssessment.volatility?.asset_latest_metrics,
+      ),
+      asset_max: normalizeFiniteNumber(riskAssessment.volatility?.asset_max),
+      benchmark_latest_metrics: normalizeVolatilityMetricMap(
+        riskAssessment.volatility?.benchmark_latest_metrics,
+      ),
+      benchmark_max: normalizeFiniteNumber(
+        riskAssessment.volatility?.benchmark_max,
+      ),
+      classification: normalizeRiskClassification(
+        riskAssessment.volatility?.classification,
+      ),
+      latest_date:
+        typeof riskAssessment.volatility?.latest_date === 'string'
+          ? riskAssessment.volatility.latest_date
+          : '',
+      relative_max_volatility: normalizeFiniteNumber(
+        riskAssessment.volatility?.relative_max_volatility,
+      ),
+    },
+  }
+}
+
+function normalizeVolatilityMetricMap(
+  metrics: Partial<Record<VolatilityMetricKey, number | null>> | undefined,
+) {
+  if (!metrics || typeof metrics !== 'object') {
+    return {}
+  }
+
+  const normalizedMetrics: Partial<Record<VolatilityMetricKey, number | null>> = {}
+
+  for (const metricKey of [
+    'daily_short_term_volatility',
+    'garch_1_1_volatility',
+    'ewma_volatility',
+  ] as const) {
+    normalizedMetrics[metricKey] = normalizeFiniteNumber(metrics[metricKey])
+  }
+
+  return normalizedMetrics
+}
+
+function normalizeFiniteNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function normalizeRiskClassification(
+  value: unknown,
+): RiskClassification | null {
+  return riskClassificationOrder.includes(value as RiskClassification)
+    ? (value as RiskClassification)
+    : null
+}
+
+const riskClassificationOrder = [
+  'Low',
+  'Moderate',
+  'High',
+  'Very High',
+  'Extreme',
+] as const

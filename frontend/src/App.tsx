@@ -23,6 +23,8 @@ import type {
   MarketDataset,
   MarketSeriesPoint,
   Metric,
+  RiskClassification,
+  TickerRiskAssessment,
 } from './types/market'
 import './App.css'
 
@@ -91,7 +93,13 @@ const percentFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
 })
 
+const decimalFormatter = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
 const minimumSplashDurationMs = 5000
+const marketBenchmarkTicker = '^GSPC'
 const ewmaLongTermLambda = 0.94
 const ewmaShortTermLambda = 0.3
 
@@ -131,6 +139,9 @@ const defaultAdvancedChartVisibility = {
 function App() {
   const [catalog, setCatalog] = useState<MarketCatalogTicker[]>([])
   const [dataset, setDataset] = useState<MarketDataset | null>(null)
+  const [benchmarkDataset, setBenchmarkDataset] = useState<MarketDataset | null>(
+    null,
+  )
   const [selectedTicker, setSelectedTicker] = useState('AAPL')
   const [selectedMetric, setSelectedMetric] = useState<Metric>('close')
   const [overviewSelectedMetric, setOverviewSelectedMetric] =
@@ -366,6 +377,36 @@ function App() {
     }
   }, [activeMetric, dataset, selectedMetric])
 
+  useEffect(() => {
+    let isDisposed = false
+
+    if (!dataset) {
+      setBenchmarkDataset(null)
+      return
+    }
+
+    if (activeTicker === marketBenchmarkTicker) {
+      setBenchmarkDataset(dataset)
+      return
+    }
+
+    loadTickerDataset(marketBenchmarkTicker)
+      .then((loadedBenchmarkDataset) => {
+        if (!isDisposed) {
+          setBenchmarkDataset(loadedBenchmarkDataset)
+        }
+      })
+      .catch(() => {
+        if (!isDisposed) {
+          setBenchmarkDataset(null)
+        }
+      })
+
+    return () => {
+      isDisposed = true
+    }
+  }, [activeTicker, dataset])
+
   const currentSeries = dataset?.series[activeTicker]?.[activeMetric] ?? null
   const currentReturnsSeries = dataset?.series[activeTicker]?.returns ?? null
   const currentDrawdownSeries = dataset?.drawdownSeries[activeTicker] ?? null
@@ -387,6 +428,66 @@ function App() {
     [currentReturnsPoints, ewmaLambda],
   )
   const currentSummary = displaySeries?.summary ?? null
+  const backendRiskAssessment =
+    dataset?.riskAssessmentByTicker[activeTicker] ?? null
+  const derivedRiskAssessment = useMemo(
+    () =>
+      backendRiskAssessment || !dataset || !benchmarkDataset
+        ? null
+        : buildRiskAssessmentFromDatasets(
+            dataset,
+            activeTicker,
+            benchmarkDataset,
+            marketBenchmarkTicker,
+          ),
+    [activeTicker, backendRiskAssessment, benchmarkDataset, dataset],
+  )
+  const currentRiskAssessment = backendRiskAssessment ?? derivedRiskAssessment
+  const riskAssessmentClassification =
+    currentRiskAssessment?.overall.classification ?? null
+  const riskAssessmentHeadline = buildRiskAssessmentHeadline(
+    activeTicker,
+    currentRiskAssessment,
+  )
+  const riskAssessmentTone = resolveRiskTone(riskAssessmentClassification)
+  const riskAssessmentTooltip = (
+    <div className="info-tooltip__stack">
+      <p>
+        Risk is measured as the higher classification between relative max
+        volatility and 30-day percentage drawdown.
+      </p>
+      <p>
+        Relative max volatility compares the asset&apos;s maximum of daily
+        rolling 30-day volatility, GARCH (1, 1), and EWMA (lambda 0.94)
+        against {currentRiskAssessment?.benchmark_ticker ?? marketBenchmarkTicker}.
+        Bands: below 1.5 Low, 1.5-2.5 Moderate, 2.5-4.0 High, above 4.0 Very
+        High.
+      </p>
+      <p>
+        Percentage drawdown uses the asset&apos;s own maximum 30-day drawdown.
+        Bands: up to 10% Low, 10-20% Moderate, 20-35% High, 35-50% Very High,
+        above 50% Extreme.
+      </p>
+      {currentRiskAssessment ? (
+        <>
+          <span className="info-tooltip__timestamp">
+            Relative max volatility:{' '}
+            {formatRiskRatioValue(
+              currentRiskAssessment.volatility.relative_max_volatility,
+            )}{' '}
+            ({currentRiskAssessment.volatility.classification ?? 'Unavailable'})
+          </span>
+          <span className="info-tooltip__timestamp">
+            30-day percentage drawdown:{' '}
+            {formatRiskDrawdownPct(
+              currentRiskAssessment.drawdown.asset_max_drawdown_pct,
+            )}{' '}
+            ({currentRiskAssessment.drawdown.classification ?? 'Unavailable'})
+          </span>
+        </>
+      ) : null}
+    </div>
+  )
 
   const hoveredDrawdownPoint = buildPointByDate(
     currentDrawdownPoints,
@@ -869,6 +970,21 @@ function App() {
                 <div className="module-header">
                   <div>
                     <p className="section-eyebrow">Market Risk Assessment</p>
+                    <div className="risk-assessment-banner-row">
+                      <p
+                        className="risk-assessment-banner"
+                        data-risk-tone={riskAssessmentTone}
+                      >
+                        {riskAssessmentHeadline}
+                      </p>
+                      <InfoTooltip
+                        label="Risk assessment details"
+                        content={riskAssessmentTooltip}
+                        align="start"
+                        side="right"
+                        sideOffset={8}
+                      />
+                    </div>
                     <h1>{activeTicker} market series</h1>
                   </div>
 
@@ -927,6 +1043,7 @@ function App() {
                   />
 
                   <ShiftingTabs
+                    className="control-rail__series-tabs"
                     label="Series selection"
                     labelTooltip={seriesSelectionTooltip}
                     options={seriesSelectionOptions}
@@ -947,6 +1064,32 @@ function App() {
                   />
                 </div>
 
+                <div className="view-rail">
+                  <div className="summary-nav-card">
+                    <nav
+                      className="chart-nav chart-nav--summary"
+                      aria-label="Market chart views"
+                    >
+                      <button
+                        type="button"
+                        className="chart-nav__link"
+                        data-active={chartView === 'overview'}
+                        onClick={() => handleChartViewChange('overview')}
+                      >
+                        Overview
+                      </button>
+                      <button
+                        type="button"
+                        className="chart-nav__link"
+                        data-active={chartView === 'advanced'}
+                        onClick={() => handleChartViewChange('advanced')}
+                      >
+                        Advanced
+                      </button>
+                    </nav>
+                  </div>
+                </div>
+
                 {isLoading ? (
                   <div className="loading-panel">
                     <div className="loading-bar"></div>
@@ -964,66 +1107,6 @@ function App() {
 
                 {!isLoading && dataset && displaySeries && currentSummary ? (
                   <>
-                    <div className="visualizer-guidance">
-                      <div className="summary-nav-card">
-                        <nav
-                          className="chart-nav chart-nav--summary"
-                          aria-label="Market chart views"
-                        >
-                          <button
-                            type="button"
-                            className="chart-nav__link"
-                            data-active={chartView === 'overview'}
-                            onClick={() => handleChartViewChange('overview')}
-                          >
-                            Overview
-                          </button>
-                          <button
-                            type="button"
-                            className="chart-nav__link"
-                            data-active={chartView === 'advanced'}
-                            onClick={() => handleChartViewChange('advanced')}
-                          >
-                            Advanced
-                          </button>
-                        </nav>
-                      </div>
-                    </div>
-
-                    <div className="visualizer-toolbar-row">
-                      <div className="chart-instructions-card">
-                        <ol className="chart-instructions-card__list">
-                          <li>
-                            Hover mouse on the chart to get risk values for
-                            hovered dates
-                          </li>
-                          <li>
-                            Left-click within the chart to lock a date of
-                            interest
-                          </li>
-                          <li>
-                            Right-click within the chart* to unlock the date and
-                            enable dynamic viewing again
-                          </li>
-                          {chartView === 'advanced' ? (
-                            <li>
-                              Toggle the toggle bar to deactivate or activate the
-                              charts
-                            </li>
-                          ) : null}
-                        </ol>
-                      </div>
-                      <div className="chart-toolbar">
-                        <div className="chart-window-card">
-                          <span className="chart-window-card__label">Window</span>
-                          <strong className="chart-window-card__value">
-                            {formatSingleDate(visibleWindowStartDate)} -{' '}
-                            {formatSingleDate(visibleWindowEndDate)}
-                          </strong>
-                        </div>
-                      </div>
-                    </div>
-
                     <div className="visualizer-body" data-chart-view={chartView}>
                       <div className="summary-rail">
                         <div className="market-summary">
@@ -1326,18 +1409,55 @@ function App() {
                         </div>
                       </div>
 
-                      <div className="chart-panel chart-stack">
-                        <AnimatePresence mode="wait" initial={false}>
-                          {chartView === 'overview' ? (
-                            <motion.div
-                              key="overview"
-                              id="market-overview"
-                              className="chart-section"
-                              initial={{ opacity: 0, y: 16, scale: 0.994 }}
-                              animate={{ opacity: 1, y: 0, scale: 1 }}
-                              exit={{ opacity: 0, y: -10, scale: 0.994 }}
-                              transition={{ duration: 0.24, ease: 'easeOut' }}
-                            >
+                      <div className="chart-column">
+                        <div className="visualizer-toolbar-row">
+                          <div className="chart-instructions-card">
+                            <ol className="chart-instructions-card__list">
+                              <li>
+                                Hover mouse on the chart to get risk values for
+                                hovered dates
+                              </li>
+                              <li>
+                                Left-click within the chart to lock a date of
+                                interest
+                              </li>
+                              <li>
+                                Right-click within the chart* to unlock the date
+                                and enable dynamic viewing again
+                              </li>
+                              {chartView === 'advanced' ? (
+                                <li>
+                                  Toggle the toggle bar to deactivate or
+                                  activate the charts
+                                </li>
+                              ) : null}
+                            </ol>
+                          </div>
+                          <div className="chart-toolbar">
+                            <div className="chart-window-card">
+                              <span className="chart-window-card__label">
+                                Window
+                              </span>
+                              <strong className="chart-window-card__value">
+                                {formatSingleDate(visibleWindowStartDate)} -{' '}
+                                {formatSingleDate(visibleWindowEndDate)}
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="chart-panel chart-stack">
+                          <AnimatePresence mode="wait" initial={false}>
+                            {chartView === 'overview' ? (
+                              <motion.div
+                                key="overview"
+                                id="market-overview"
+                                className="chart-section"
+                                initial={{ opacity: 0, y: 16, scale: 0.994 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: -10, scale: 0.994 }}
+                                transition={{ duration: 0.24, ease: 'easeOut' }}
+                              >
                               <ExpandableChartCard
                                 expanded={expandedChartId === 'overview-primary'}
                                 label={`${activeTicker} ${metricMeta[activeMetric].chartLabel}`}
@@ -1389,17 +1509,17 @@ function App() {
                                   </ExpandableChartCard>
                                 </>
                               ) : null}
-                            </motion.div>
-                          ) : (
-                            <motion.div
-                              key="advanced"
-                              id="market-advanced"
-                              className="chart-section"
-                              initial={{ opacity: 0, y: 16, scale: 0.994 }}
-                              animate={{ opacity: 1, y: 0, scale: 1 }}
-                              exit={{ opacity: 0, y: -10, scale: 0.994 }}
-                              transition={{ duration: 0.24, ease: 'easeOut' }}
-                            >
+                              </motion.div>
+                            ) : (
+                              <motion.div
+                                key="advanced"
+                                id="market-advanced"
+                                className="chart-section"
+                                initial={{ opacity: 0, y: 16, scale: 0.994 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: -10, scale: 0.994 }}
+                                transition={{ duration: 0.24, ease: 'easeOut' }}
+                              >
                               <div className="advanced-chart-grid">
                                 {advancedChartVisibility.returns ? (
                                   <ExpandableChartCard
@@ -1609,9 +1729,10 @@ function App() {
                                   </div>
                                 ) : null}
                               </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
                       </div>
                     </div>
                   </>
@@ -1743,6 +1864,22 @@ function formatSingleDate(date: string) {
   }
 
   return dateFormatter.format(new Date(date))
+}
+
+function formatRiskRatioValue(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 'Unavailable'
+  }
+
+  return decimalFormatter.format(value)
+}
+
+function formatRiskDrawdownPct(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 'Unavailable'
+  }
+
+  return `${decimalFormatter.format(value)}%`
 }
 
 function buildVisiblePointWindow(
@@ -1963,6 +2100,329 @@ function resolveEwmaPresetLabel(lambda: number) {
 
   return null
 }
+
+function buildRiskAssessmentHeadline(
+  ticker: string,
+  riskAssessment: TickerRiskAssessment | null,
+) {
+  const classification = riskAssessment?.overall.classification?.toUpperCase()
+
+  return `${ticker} is assessed to be ${classification ?? 'UNAVAILABLE'} risk`
+}
+
+function resolveRiskTone(classification: RiskClassification | null | undefined) {
+  switch (classification) {
+    case 'Low':
+      return 'low'
+    case 'Moderate':
+      return 'moderate'
+    case 'High':
+      return 'high'
+    case 'Very High':
+      return 'very-high'
+    case 'Extreme':
+      return 'extreme'
+    default:
+      return 'unavailable'
+  }
+}
+
+function buildRiskAssessmentFromDatasets(
+  assetDataset: MarketDataset,
+  assetTicker: string,
+  benchmarkDataset: MarketDataset,
+  benchmarkTicker: string,
+): TickerRiskAssessment | null {
+  const assetClosePoints = assetDataset.series[assetTicker]?.close?.points ?? []
+  const benchmarkClosePoints =
+    benchmarkDataset.series[benchmarkTicker]?.close?.points ?? []
+
+  if (!assetClosePoints.length || !benchmarkClosePoints.length) {
+    return null
+  }
+
+  const lookbackDays = 30
+  const drawdownWindowEndDate = assetClosePoints.at(-1)?.date ?? null
+
+  if (!drawdownWindowEndDate) {
+    return null
+  }
+
+  const drawdownWindowStartDate = subtractDaysFromIsoDate(
+    drawdownWindowEndDate,
+    lookbackDays,
+  )
+  const assetMaxDrawdownPct = buildMaxDrawdownPctInWindow(
+    assetClosePoints,
+    drawdownWindowStartDate,
+    drawdownWindowEndDate,
+  )
+  const drawdownClassification = classifyDrawdownPct(assetMaxDrawdownPct)
+
+  const assetReturnsPoints = assetDataset.series[assetTicker]?.returns?.points ?? []
+  const benchmarkReturnsPoints =
+    benchmarkDataset.series[benchmarkTicker]?.returns?.points ?? []
+  const assetShortTermVolatilityPoints =
+    assetDataset.shortTermVolatilitySeries[assetTicker]?.points ?? []
+  const benchmarkShortTermVolatilityPoints =
+    benchmarkDataset.shortTermVolatilitySeries[benchmarkTicker]?.points ?? []
+  const assetGarchVolatilityPoints =
+    assetDataset.garchVolatilitySeries[assetTicker]?.points ?? []
+  const benchmarkGarchVolatilityPoints =
+    benchmarkDataset.garchVolatilitySeries[benchmarkTicker]?.points ?? []
+  const assetEwmaVolatilityPoints = buildEwmaVolatilityPoints(
+    assetReturnsPoints,
+    ewmaLongTermLambda,
+  )
+  const benchmarkEwmaVolatilityPoints = buildEwmaVolatilityPoints(
+    benchmarkReturnsPoints,
+    ewmaLongTermLambda,
+  )
+  const volatilityReferenceDate = minIsoDate(
+    assetShortTermVolatilityPoints.at(-1)?.date ?? assetReturnsPoints.at(-1)?.date,
+    benchmarkShortTermVolatilityPoints.at(-1)?.date ??
+      benchmarkReturnsPoints.at(-1)?.date,
+    assetGarchVolatilityPoints.at(-1)?.date,
+    benchmarkGarchVolatilityPoints.at(-1)?.date,
+    assetEwmaVolatilityPoints.at(-1)?.date,
+    benchmarkEwmaVolatilityPoints.at(-1)?.date,
+  )
+  const assetVolatilityMetrics = buildVolatilityMetricSnapshot(
+    assetShortTermVolatilityPoints,
+    assetGarchVolatilityPoints,
+    assetEwmaVolatilityPoints,
+    volatilityReferenceDate,
+  )
+  const benchmarkVolatilityMetrics = buildVolatilityMetricSnapshot(
+    benchmarkShortTermVolatilityPoints,
+    benchmarkGarchVolatilityPoints,
+    benchmarkEwmaVolatilityPoints,
+    volatilityReferenceDate,
+  )
+  const assetMaxVolatility = buildMaxFiniteNumber(
+    Object.values(assetVolatilityMetrics),
+  )
+  const benchmarkMaxVolatility = buildMaxFiniteNumber(
+    Object.values(benchmarkVolatilityMetrics),
+  )
+  const relativeMaxVolatility = buildRatio(
+    assetMaxVolatility,
+    benchmarkMaxVolatility,
+  )
+  const volatilityClassification = classifyRelativeMaxVolatility(
+    relativeMaxVolatility,
+  )
+  const overallClassification = buildOverallRiskClassification(
+    volatilityClassification,
+    drawdownClassification,
+  )
+
+  return {
+    benchmark_ticker: benchmarkTicker,
+    drawdown: {
+      asset_max_drawdown_pct: assetMaxDrawdownPct,
+      benchmark_max_drawdown_pct: null,
+      classification: drawdownClassification,
+      lookback_days: lookbackDays,
+      relative_drawdown_ratio: null,
+      window_end_date: drawdownWindowEndDate,
+      window_start_date: drawdownWindowStartDate,
+    },
+    overall: {
+      classification: overallClassification,
+      label: overallClassification ? `${overallClassification} risk` : null,
+    },
+    volatility: {
+      asset_latest_metrics: assetVolatilityMetrics,
+      asset_max: assetMaxVolatility,
+      benchmark_latest_metrics: benchmarkVolatilityMetrics,
+      benchmark_max: benchmarkMaxVolatility,
+      classification: volatilityClassification,
+      latest_date: volatilityReferenceDate ?? '',
+      relative_max_volatility: relativeMaxVolatility,
+    },
+  }
+}
+
+function buildVolatilityMetricSnapshot(
+  shortTermVolatilityPoints: MarketSeriesPoint[],
+  garchVolatilityPoints: MarketSeriesPoint[],
+  ewmaVolatilityPoints: MarketSeriesPoint[],
+  referenceDate: string | null,
+) {
+  return {
+    daily_short_term_volatility: buildPointAtOrBeforeDate(
+      shortTermVolatilityPoints,
+      referenceDate,
+    )?.value ?? null,
+    ewma_volatility:
+      buildPointAtOrBeforeDate(ewmaVolatilityPoints, referenceDate)?.value ??
+      null,
+    garch_1_1_volatility:
+      buildPointAtOrBeforeDate(garchVolatilityPoints, referenceDate)?.value ??
+      null,
+  }
+}
+
+function buildMaxDrawdownPctInWindow(
+  closePoints: MarketSeriesPoint[],
+  startDate: string,
+  endDate: string,
+) {
+  const windowPoints = closePoints.filter(
+    (point) => point.date >= startDate && point.date <= endDate,
+  )
+
+  if (!windowPoints.length) {
+    return null
+  }
+
+  let rollingPeak = windowPoints[0].value
+  let maximumDrawdownPct = 0
+
+  for (const point of windowPoints) {
+    rollingPeak = Math.max(rollingPeak, point.value)
+
+    if (rollingPeak <= 0) {
+      continue
+    }
+
+    const drawdownPct = ((rollingPeak - point.value) / rollingPeak) * 100
+
+    if (Number.isFinite(drawdownPct)) {
+      maximumDrawdownPct = Math.max(maximumDrawdownPct, drawdownPct)
+    }
+  }
+
+  return maximumDrawdownPct
+}
+
+function subtractDaysFromIsoDate(date: string, days: number) {
+  const [year, month, day] = date.split('-').map(Number)
+
+  if (!year || !month || !day) {
+    return date
+  }
+
+  const utcTimestamp = Date.UTC(year, month - 1, day) - days * 24 * 60 * 60 * 1000
+
+  return new Date(utcTimestamp).toISOString().slice(0, 10)
+}
+
+function minIsoDate(...dates: Array<string | null | undefined>) {
+  const normalizedDates = dates.filter(
+    (date): date is string => typeof date === 'string' && date.length > 0,
+  )
+
+  if (!normalizedDates.length) {
+    return null
+  }
+
+  return normalizedDates.reduce((currentMin, date) =>
+    date < currentMin ? date : currentMin,
+  )
+}
+
+function buildMaxFiniteNumber(values: Array<number | null | undefined>) {
+  const finiteValues = values.filter(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value),
+  )
+
+  if (!finiteValues.length) {
+    return null
+  }
+
+  return Math.max(...finiteValues)
+}
+
+function buildRatio(
+  numerator: number | null | undefined,
+  denominator: number | null | undefined,
+) {
+  if (
+    typeof numerator !== 'number' ||
+    typeof denominator !== 'number' ||
+    !Number.isFinite(numerator) ||
+    !Number.isFinite(denominator) ||
+    denominator <= 0
+  ) {
+    return null
+  }
+
+  return numerator / denominator
+}
+
+function classifyRelativeMaxVolatility(ratio: number | null | undefined) {
+  if (typeof ratio !== 'number' || !Number.isFinite(ratio)) {
+    return null
+  }
+
+  if (ratio < 1.5) {
+    return 'Low'
+  }
+
+  if (ratio <= 2.5) {
+    return 'Moderate'
+  }
+
+  if (ratio <= 4.0) {
+    return 'High'
+  }
+
+  return 'Very High'
+}
+
+function classifyDrawdownPct(drawdownPct: number | null | undefined) {
+  if (typeof drawdownPct !== 'number' || !Number.isFinite(drawdownPct)) {
+    return null
+  }
+
+  if (drawdownPct <= 10) {
+    return 'Low'
+  }
+
+  if (drawdownPct <= 20) {
+    return 'Moderate'
+  }
+
+  if (drawdownPct <= 35) {
+    return 'High'
+  }
+
+  if (drawdownPct <= 50) {
+    return 'Very High'
+  }
+
+  return 'Extreme'
+}
+
+function buildOverallRiskClassification(
+  ...classifications: Array<RiskClassification | null>
+) {
+  const availableClassifications = classifications.filter(
+    (classification): classification is RiskClassification =>
+      classification !== null,
+  )
+
+  if (!availableClassifications.length) {
+    return null
+  }
+
+  return availableClassifications.reduce((currentMax, classification) =>
+    riskClassificationOrder.indexOf(classification) >
+    riskClassificationOrder.indexOf(currentMax)
+      ? classification
+      : currentMax,
+  )
+}
+
+const riskClassificationOrder: RiskClassification[] = [
+  'Low',
+  'Moderate',
+  'High',
+  'Very High',
+  'Extreme',
+]
 
 interface ExpandableChartCardProps {
   children: ReactNode

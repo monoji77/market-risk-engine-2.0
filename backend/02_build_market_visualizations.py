@@ -133,6 +133,15 @@ def write_market_ticker_payloads(
         write_market_ticker_payload(ticker_filename, payload)
 
 
+def build_and_write_market_visualizations(
+    close_prices: pd.DataFrame,
+    available_tickers: list[str],
+) -> None:
+    market_catalog = build_market_catalog(available_tickers)
+    write_market_catalog_payload(market_catalog)
+    write_market_ticker_payloads(close_prices, available_tickers)
+
+
 ############################
 #
 # [4] MAIN FUNCTION

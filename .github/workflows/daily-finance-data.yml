@@ -8,18 +8,22 @@ on:
   # Allows you to manually run it from GitHub Actions tab
   workflow_dispatch:
 
+env:
+  AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+  AZURE_STORAGE_SAS_TOKEN: ${{ secrets.AZURE_STORAGE_SAS_TOKEN }}
+  AZURE_STORAGE_ACCOUNT_NAME: ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}
+  AZURE_STORAGE_CONTAINER_RAW: ${{ secrets.AZURE_STORAGE_CONTAINER_RAW }}
+  AZURE_STORAGE_CONTAINER_ARTIFACTS: ${{ secrets.AZURE_STORAGE_CONTAINER_ARTIFACTS }}
+  AZURE_STORAGE_CONTAINER_CACHE: ${{ secrets.AZURE_STORAGE_CONTAINER_CACHE }}
+
+concurrency:
+  group: daily-finance-data-refresh
+  cancel-in-progress: false
+
 jobs:
-  refresh-finance-data:
+  refresh-raw-price-storage:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
-      AZURE_STORAGE_SAS_TOKEN: ${{ secrets.AZURE_STORAGE_SAS_TOKEN }}
-      AZURE_STORAGE_ACCOUNT_NAME: ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}
-      AZURE_STORAGE_CONTAINER_RAW: ${{ secrets.AZURE_STORAGE_CONTAINER_RAW }}
-      AZURE_STORAGE_CONTAINER_ARTIFACTS: ${{ secrets.AZURE_STORAGE_CONTAINER_ARTIFACTS }}
-      AZURE_STORAGE_CONTAINER_CACHE: ${{ secrets.AZURE_STORAGE_CONTAINER_CACHE }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -56,9 +60,95 @@ jobs:
             exit 1
           fi
 
-      - name: Refresh market data in Azure Blob Storage
+      - name: Refresh raw price data in Azure Blob Storage
         run: |
           python -m backend.01_read_data
+
+  build-market-visualizations:
+    runs-on: ubuntu-latest
+    needs: refresh-raw-price-storage
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Validate Azure storage configuration
+        run: |
+          if [ -z "${AZURE_STORAGE_CONTAINER_RAW}" ]; then
+            echo "::error::Missing AZURE_STORAGE_CONTAINER_RAW secret."
+            exit 1
+          fi
+
+          if [ -z "${AZURE_STORAGE_CONTAINER_ARTIFACTS}" ]; then
+            echo "::error::Missing AZURE_STORAGE_CONTAINER_ARTIFACTS secret."
+            exit 1
+          fi
+
+          if [ -z "${AZURE_STORAGE_CONNECTION_STRING}" ] && [ -z "${AZURE_STORAGE_SAS_TOKEN}" ]; then
+            echo "::error::Set either AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_SAS_TOKEN."
+            exit 1
+          fi
+
+          if [ -n "${AZURE_STORAGE_SAS_TOKEN}" ] && [ -z "${AZURE_STORAGE_ACCOUNT_NAME}" ]; then
+            echo "::error::AZURE_STORAGE_ACCOUNT_NAME is required when using AZURE_STORAGE_SAS_TOKEN."
+            exit 1
+          fi
+
+      - name: Build market visualization artifacts
+        run: |
           python -m backend.02_build_market_visualizations
+
+  build-advanced-metrics:
+    runs-on: ubuntu-latest
+    needs: refresh-raw-price-storage
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Validate Azure storage configuration
+        run: |
+          if [ -z "${AZURE_STORAGE_CONTAINER_RAW}" ]; then
+            echo "::error::Missing AZURE_STORAGE_CONTAINER_RAW secret."
+            exit 1
+          fi
+
+          if [ -z "${AZURE_STORAGE_CONTAINER_ARTIFACTS}" ]; then
+            echo "::error::Missing AZURE_STORAGE_CONTAINER_ARTIFACTS secret."
+            exit 1
+          fi
+
+          if [ -z "${AZURE_STORAGE_CONNECTION_STRING}" ] && [ -z "${AZURE_STORAGE_SAS_TOKEN}" ]; then
+            echo "::error::Set either AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_SAS_TOKEN."
+            exit 1
+          fi
+
+          if [ -n "${AZURE_STORAGE_SAS_TOKEN}" ] && [ -z "${AZURE_STORAGE_ACCOUNT_NAME}" ]; then
+            echo "::error::AZURE_STORAGE_ACCOUNT_NAME is required when using AZURE_STORAGE_SAS_TOKEN."
+            exit 1
+          fi
+
+      - name: Build advanced metric artifacts
+        run: |
           python -m backend.03_calculate_other_risk_measures
           python -m backend.04_garch_1_1_market_volatility
