@@ -103,13 +103,20 @@ type ExpandedChartId =
   | 'advanced-returns'
   | 'advanced-drawdown'
   | 'advanced-volatility'
+  | 'advanced-garch'
   | 'advanced-ewma'
-type AdvancedChartKey = 'returns' | 'drawdown' | 'volatility' | 'ewma'
+type AdvancedChartKey =
+  | 'returns'
+  | 'drawdown'
+  | 'volatility'
+  | 'garch'
+  | 'ewma'
 
 const advancedChartExpansionIds = {
   returns: 'advanced-returns',
   drawdown: 'advanced-drawdown',
   volatility: 'advanced-volatility',
+  garch: 'advanced-garch',
   ewma: 'advanced-ewma',
 } satisfies Record<AdvancedChartKey, ExpandedChartId>
 
@@ -117,6 +124,7 @@ const defaultAdvancedChartVisibility = {
   returns: true,
   drawdown: true,
   volatility: true,
+  garch: true,
   ewma: true,
 } satisfies Record<AdvancedChartKey, boolean>
 
@@ -363,6 +371,8 @@ function App() {
   const currentDrawdownSeries = dataset?.drawdownSeries[activeTicker] ?? null
   const currentShortTermVolatilitySeries =
     dataset?.shortTermVolatilitySeries[activeTicker] ?? null
+  const currentGarchVolatilitySeries =
+    dataset?.garchVolatilitySeries[activeTicker] ?? null
   const currentReturnsPoints = currentReturnsSeries?.points ?? []
   const currentDrawdownPoints = currentDrawdownSeries?.points ?? []
   const displayMetric: Metric = chartView === 'advanced' ? 'returns' : activeMetric
@@ -371,6 +381,7 @@ function App() {
   const currentPoints = displaySeries?.points ?? []
   const currentShortTermVolatilityPoints =
     currentShortTermVolatilitySeries?.points ?? []
+  const currentGarchVolatilityPoints = currentGarchVolatilitySeries?.points ?? []
   const currentEwmaVolatilityPoints = useMemo(
     () => buildEwmaVolatilityPoints(currentReturnsPoints, ewmaLambda),
     [currentReturnsPoints, ewmaLambda],
@@ -391,6 +402,12 @@ function App() {
     hoveredShortTermVolatilityPoint ??
     currentShortTermVolatilityPoints.at(-1) ??
     null
+  const hoveredGarchVolatilityPoint = buildPointByDate(
+    currentGarchVolatilityPoints,
+    sharedHoverDate,
+  )
+  const activeGarchVolatilityPoint =
+    hoveredGarchVolatilityPoint ?? currentGarchVolatilityPoints.at(-1) ?? null
   const hoveredEwmaVolatilityPoint = buildPointByDate(
     currentEwmaVolatilityPoints,
     sharedHoverDate,
@@ -420,8 +437,13 @@ function App() {
 
   const ewmaPresetLabel = resolveEwmaPresetLabel(ewmaLambda)
   const ewmaLambdaLabel = ewmaLambda.toFixed(2)
+  const garchDistributionLabel =
+    dataset?.garchDistributionByTicker[activeTicker] ?? null
   const drawdownReportedValueLabel = activeDrawdownPoint
     ? `${currencyFormatter.format(activeDrawdownPoint.value)} on ${formatSingleDate(activeDrawdownPoint.date)}`
+    : 'Unavailable'
+  const garchReportedValueLabel = activeGarchVolatilityPoint
+    ? `${percentFormatter.format(activeGarchVolatilityPoint.value)} on ${formatSingleDate(activeGarchVolatilityPoint.date)}`
     : 'Unavailable'
   const ewmaReportedValueLabel = activeEwmaVolatilityPoint
     ? `${percentFormatter.format(activeEwmaVolatilityPoint.value)} on ${formatSingleDate(activeEwmaVolatilityPoint.date)}`
@@ -456,6 +478,7 @@ function App() {
     (isTickerRefreshing ||
       isAdvancedReturnsBuffering ||
       isAdvancedVolatilityBuffering)
+  const isAdvancedGarchChartRefreshing = isAdvancedVolatilityChartRefreshing
   const isAdvancedEwmaChartRefreshing =
     chartView === 'advanced' &&
     (isTickerRefreshing || isAdvancedReturnsBuffering)
@@ -471,6 +494,7 @@ function App() {
     advancedChartVisibility.returns ||
     advancedChartVisibility.drawdown ||
     advancedChartVisibility.volatility ||
+    advancedChartVisibility.garch ||
     advancedChartVisibility.ewma
 
   const returnsChartTooltip = (
@@ -512,6 +536,26 @@ function App() {
           95% Confidence Range: {dailyVolatilityConfidenceIntervalLabel}
         </span>
       ) : null}
+    </div>
+  )
+
+  const garchVolatilityTooltip = (
+    <div className="info-tooltip__stack">
+      <p>
+        Conditional volatility from an AR(1)-GARCH(1, 1) model fit to daily
+        close returns.
+      </p>
+      <p>
+        The model distribution is selected per ticker using the lowest AIC
+        across normal, Student&apos;s t, skewed Student&apos;s t, and generalized
+        error candidates.
+      </p>
+      <span className="info-tooltip__timestamp">
+        Distribution: {garchDistributionLabel ?? 'Unavailable'}
+      </span>
+      <span className="info-tooltip__timestamp">
+        Reported value: {garchReportedValueLabel}
+      </span>
     </div>
   )
 
@@ -1137,6 +1181,47 @@ function App() {
                                 </strong>
                               </div>
 
+                              <div className="summary-stat summary-stat--volatility">
+                                <div className="summary-stat__heading">
+                                  <div className="summary-stat__heading-copy">
+                                    <span className="summary-stat__title summary-stat__title--volatility">
+                                      GARCH (1, 1) volatility
+                                    </span>
+                                    <InfoTooltip
+                                      label="GARCH (1, 1) volatility details"
+                                      content={garchVolatilityTooltip}
+                                      align="start"
+                                      side="right"
+                                      sideOffset={6}
+                                    />
+                                  </div>
+                                  <ChartVisibilityToggle
+                                    isVisible={advancedChartVisibility.garch}
+                                    label="garch (1, 1) volatility"
+                                    onToggle={() =>
+                                      handleAdvancedChartVisibilityToggle('garch')
+                                    }
+                                  />
+                                </div>
+                                <span className="summary-stat__meta">
+                                  Dist {garchDistributionLabel ?? 'Unavailable'}
+                                </span>
+                                <strong>
+                                  {activeGarchVolatilityPoint ? (
+                                    <CountUpValue
+                                      key={`${activeTicker}:garch-1-1-volatility`}
+                                      formatValue={(value) =>
+                                        percentFormatter.format(value)
+                                      }
+                                      startWhen={startAdvancedCountUp}
+                                      value={activeGarchVolatilityPoint.value}
+                                    />
+                                  ) : (
+                                    'Unavailable'
+                                  )}
+                                </strong>
+                              </div>
+
                               <div className="summary-stat summary-stat--volatility summary-stat--ewma">
                                 <div className="summary-stat__heading">
                                   <div className="summary-stat__heading-copy">
@@ -1443,6 +1528,44 @@ function App() {
                                     <AdvancedPlaceholder
                                       items={[
                                         'Generate backend advanced volatility measures',
+                                      ]}
+                                    />
+                                  )
+                                ) : null}
+
+                                {advancedChartVisibility.garch ? (
+                                  currentGarchVolatilityPoints.length ? (
+                                    <ExpandableChartCard
+                                      className="advanced-chart-slot"
+                                      expanded={expandedChartId === 'advanced-garch'}
+                                      label={`${activeTicker} garch (1, 1) volatility`}
+                                      onToggle={() =>
+                                        handleExpandedChartToggle('advanced-garch')
+                                      }
+                                    >
+                                      <ShortTermVolatilityChart
+                                        ticker={activeTicker}
+                                        points={currentGarchVolatilityPoints}
+                                        title="GARCH (1, 1) volatility"
+                                        tooltipLabel="GARCH (1, 1) volatility details"
+                                        defaultVisibleFrom={chartFocusStartDate}
+                                        rangeResetKey={activeTicker}
+                                        isRefreshing={isAdvancedGarchChartRefreshing}
+                                        isHoverLocked={isHoverDateLocked}
+                                        onHoverDateChange={handleSharedHoverDateChange}
+                                        onHoverLockChange={handleSharedHoverLockChange}
+                                        onVisibleRangeChange={handleSharedVisibleRangeChange}
+                                        refreshLabel={`${selectedTicker} garch (1, 1) volatility`}
+                                        syncedHoverDate={sharedHoverDate}
+                                        syncedVisibleRange={sharedVisibleRange}
+                                        tooltipContent={garchVolatilityTooltip}
+                                        visualTone="price"
+                                      />
+                                    </ExpandableChartCard>
+                                  ) : (
+                                    <AdvancedPlaceholder
+                                      items={[
+                                        'Run backend/04_garch_1_1_market_volatility.py',
                                       ]}
                                     />
                                   )

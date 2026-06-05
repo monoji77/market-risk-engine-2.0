@@ -44,22 +44,6 @@ def calculate_short_term_volatility(returns: pd.DataFrame) -> pd.DataFrame:
     return volatility
 
 
-# recall that GARCH(1, 1) model is defined as...
-# sigma_t^2 = gamma * Var_{long run} + alpha * sigma_{t-1}^2 + beta * R_{t-1}^2
-#   where:
-#       (1) gamma + alpha + beta = 1
-#       (2) sigma_{t-1}^2 and R_{t-1}^2 are known variables (not random)
-#       (3) GARCH(1, 1) volatility is the square root of sigma_t^2
-#
-# NOTE: we need to estimate the parameters (gamma, alpha, beta) using historical data
-
-
-def calculate_garch_1_1_volatility(returns: pd.DataFrame) -> pd.DataFrame:
-
-
-    pass
-
-
 def build_advanced_metric_payload(ticker: str, short_term_volatility: pd.DataFrame) -> dict:
     volatility_series = short_term_volatility[ticker]
     point_records = convert_series_to_point_records(volatility_series)

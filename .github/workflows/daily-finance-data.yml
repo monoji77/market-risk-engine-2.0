@@ -61,3 +61,4 @@ jobs:
           python -m backend.01_read_data
           python -m backend.02_build_market_visualizations
           python -m backend.03_calculate_other_risk_measures
+          python -m backend.04_garch_1_1_market_volatility

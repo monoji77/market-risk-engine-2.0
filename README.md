@@ -38,7 +38,8 @@ Live site: [market-risk-engine-2-0.vercel.app](https://market-risk-engine-2-0.ve
 │   ├── utils/                       # Shared backend helpers
 │   ├── 01_read_data.py              # Yahoo Finance data download script
 │   ├── 02_build_market_visualizations.py  # Market + drawdown artifact builder
-│   └── 03_calculate_other_risk_measures.py # Advanced metrics artifact builder
+│   ├── 03_calculate_other_risk_measures.py # Advanced metrics artifact builder
+│   └── 04_garch_1_1_market_volatility.py  # GARCH volatility + distribution artifact builder
 ├── frontend/
 │   ├── public/                      # Frontend static assets like favicon/icons
 │   ├── src/
@@ -60,8 +61,10 @@ Live site: [market-risk-engine-2-0.vercel.app](https://market-risk-engine-2-0.ve
 - Interactive market visualizations for close price, close returns, and close log-returns
 - Drawdown chart linked to the same visible range as the main market chart
 - Daily short term volatility chart with synchronized zoom, crosshair linking, and peak/trough annotations
+- GARCH (1, 1) volatility chart sourced from Azure-backed advanced metrics with per-ticker best-fit return distributions
 - EWMA volatility chart and risk card with frontend lambda controls, including `Long term (0.94)`, `Short term (0.30)`, and custom slider input
-- Summary cards for net move, drawdown, daily short term volatility, and EWMA volatility, including crosshair-driven updates
+- Summary cards for net move, drawdown, daily short term volatility, GARCH (1, 1) volatility, and EWMA volatility, including crosshair-driven updates
+- Distribution summary CSV artifacts written to Azure Blob Storage for best-fit GARCH return-distribution selection
 - 95% confidence range interpretation for daily volatility under normal market conditions
 - Asset and series switching with frontend-side buffering and transition effects
 - Market catalog entries include ticker-level `security` metadata so the frontend can show descriptive asset names directly from generated JSON
@@ -132,6 +135,7 @@ python -m pip install -r requirements.txt
 python -m backend.01_read_data
 python -m backend.02_build_market_visualizations
 python -m backend.03_calculate_other_risk_measures
+python -m backend.04_garch_1_1_market_volatility
 
 cd frontend
 npm install
@@ -171,6 +175,7 @@ The frontend prefers `VITE_AZURE_BLOB_ARTIFACTS_URL` when it is set. If it is no
 | `python -m backend.01_read_data` | Downloads and refreshes source market CSVs into Azure Blob Storage |
 | `python -m backend.02_build_market_visualizations` | Builds market catalog plus per-ticker market and drawdown JSON artifacts in Azure Blob Storage |
 | `python -m backend.03_calculate_other_risk_measures` | Builds per-ticker advanced risk metrics artifacts in Azure Blob Storage |
+| `python -m backend.04_garch_1_1_market_volatility` | Adds GARCH (1, 1) volatility and distribution summary artifacts in Azure Blob Storage |
 | `uvicorn api.main:app --reload --app-dir backend` | Runs the optional FastAPI backend locally |
 
 ## Deployment
@@ -197,6 +202,7 @@ It now runs the data scripts as Python modules:
 python -m backend.01_read_data
 python -m backend.02_build_market_visualizations
 python -m backend.03_calculate_other_risk_measures
+python -m backend.04_garch_1_1_market_volatility
 ```
 
 That matters because the backend scripts import `backend.utils.utils`; invoking them as modules keeps the import path stable on GitHub runners and local machines. As long as the runner can reach Yahoo Finance, the S&P 500 constituents source, and the configured Azure Storage account, GitHub Actions will repopulate the Blob-backed CSV and JSON payloads, including the catalog fields used for ticker descriptions such as `security`.

@@ -4,7 +4,9 @@ export const metricOrder = ['close', 'returns', 'log_returns'] as const
 
 export type Metric = (typeof metricOrder)[number]
 
-export type AdvancedMetric = 'daily_short_term_volatility'
+export type AdvancedMetric =
+  | 'daily_short_term_volatility'
+  | 'garch_1_1_volatility'
 
 export interface MarketCatalogTicker {
   name?: string | null
@@ -35,6 +37,7 @@ export interface MarketTickerPayload {
 
 export interface AdvancedTickerPayload {
   end_date: string
+  garch_1_1_distribution?: string | null
   metrics: AdvancedMetric[]
   series: Partial<Record<AdvancedMetric, MarketPointRow[]>>
   start_date: string
@@ -75,6 +78,8 @@ export interface MarketSeries {
 export interface MarketDataset {
   drawdownSeries: Record<string, MarketSeries>
   endDate: string
+  garchDistributionByTicker: Record<string, string | null>
+  garchVolatilitySeries: Record<string, MarketSeries>
   metrics: Metric[]
   rowCount: number
   series: Record<string, Partial<Record<Metric, MarketSeries>>>

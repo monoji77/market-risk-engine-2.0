@@ -244,12 +244,21 @@ function normalizeTickerPayload(
     advancedPayload?.series.daily_short_term_volatility ?? []
   const shortTermVolatilityMarketSeries = buildSeries(shortTermVolatilityRows)
   rowCount += shortTermVolatilityMarketSeries.points.length
+  const garchVolatilityRows = advancedPayload?.series.garch_1_1_volatility ?? []
+  const garchVolatilityMarketSeries = buildSeries(garchVolatilityRows)
+  rowCount += garchVolatilityMarketSeries.points.length
 
   return {
     drawdownSeries: {
       [ticker]: drawdownMarketSeries,
     },
     endDate: marketPayload.end_date,
+    garchDistributionByTicker: {
+      [ticker]: advancedPayload?.garch_1_1_distribution ?? null,
+    },
+    garchVolatilitySeries: {
+      [ticker]: garchVolatilityMarketSeries,
+    },
     metrics,
     rowCount,
     series,
